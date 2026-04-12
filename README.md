@@ -1,4 +1,4 @@
-# 🇷🇴 Utilități România – Home Assistant Integration
+# Utilități România – Home Assistant Integration
 
 Integrarea **Utilități România** aduce într-un singur loc datele de consum, facturare și interacțiune cu furnizorii de utilități din România, direct în Home Assistant.
 
