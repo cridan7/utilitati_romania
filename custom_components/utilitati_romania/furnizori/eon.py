@@ -135,43 +135,83 @@ def _tip_utilitate_din_cod(cod: str | None) -> str:
     return "necunoscut"
 
 
+def _cheie_sortare_factura(item: dict) -> tuple[int, datetime]:
+    if not isinstance(item, dict):
+        return (0, datetime.min)
+
+    raw = _safe_str(
+        item.get("maturityDate")
+        or item.get("dueDate")
+        or item.get("scadenceDate")
+        or item.get("emissionDate")
+        or item.get("issueDate")
+        or item.get("invoiceDate")
+        or ""
+    )
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return (1, datetime.strptime(raw[:19], fmt))
+        except ValueError:
+            pass
+    parsed = _parse_date(raw)
+    if parsed:
+        return (1, datetime.combine(parsed, datetime.min.time()))
+    return (0, datetime.min)
+
+
 def _gaseste_ultima_factura_neachitata(facturi: list[dict] | None) -> dict | None:
     if not facturi or not isinstance(facturi, list):
         return None
 
-    def _cheie_sortare(item: dict) -> tuple[int, datetime]:
-        raw = _safe_str(item.get("maturityDate") or item.get("emissionDate") or "")
-        for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S"):
-            try:
-                return (1, datetime.strptime(raw[:19], fmt))
-            except ValueError:
-                pass
-        return (0, datetime.min)
-
-    facturi_sortate = sorted(facturi, key=_cheie_sortare, reverse=True)
+    facturi_sortate = sorted(facturi, key=_cheie_sortare_factura, reverse=True)
     return facturi_sortate[0] if facturi_sortate else None
+
+
+def _gaseste_ultima_factura_achitata(facturi: list[dict] | None) -> dict | None:
+    if not facturi or not isinstance(facturi, list):
+        return None
+
+    facturi_sortate = sorted(facturi, key=_cheie_sortare_factura, reverse=True)
+    return facturi_sortate[0] if facturi_sortate else None
+
+
+def _factura_are_date_relevante(factura: dict | None) -> bool:
+    if not isinstance(factura, dict):
+        return False
+
+    return bool(
+        factura.get("invoiceNumber")
+        or factura.get("number")
+        or factura.get("maturityDate")
+        or factura.get("dueDate")
+        or factura.get("scadenceDate")
+        or factura.get("emissionDate")
+        or factura.get("issueDate")
+        or factura.get("invoiceDate")
+        or factura.get("issuedValue")
+        or factura.get("invoiceValue")
+        or factura.get("amount")
+        or factura.get("value")
+        or factura.get("balanceValue")
+        or factura.get("totalBalance")
+    )
 
 
 def _factura_relevanta(
     invoices_unpaid: list[dict] | None,
+    invoices_paid: list[dict] | None,
     invoice_balance: dict | None,
 ) -> dict | None:
     factura = _gaseste_ultima_factura_neachitata(invoices_unpaid)
     if factura:
         return factura
 
-    if isinstance(invoice_balance, dict):
-        if (
-            invoice_balance.get("invoiceNumber")
-            or invoice_balance.get("number")
-            or invoice_balance.get("maturityDate")
-            or invoice_balance.get("emissionDate")
-            or invoice_balance.get("issuedValue")
-            or invoice_balance.get("invoiceValue")
-            or invoice_balance.get("balanceValue")
-            or invoice_balance.get("totalBalance")
-        ):
-            return invoice_balance
+    factura = _gaseste_ultima_factura_achitata(invoices_paid)
+    if factura:
+        return factura
+
+    if _factura_are_date_relevante(invoice_balance):
+        return invoice_balance
 
     return None
 
@@ -540,6 +580,7 @@ class ClientFurnizorEon(ClientFurnizor):
                 self._api.async_fetch_contract_details(cod_contract),
                 self._api.async_fetch_invoice_balance(cod_contract),
                 self._api.async_fetch_invoices_unpaid(cod_contract),
+                self._api.async_fetch_invoices_paid(cod_contract, max_pages=6),
                 self._api.async_fetch_meter_index(cod_contract),
                 self._api.async_fetch_consumption_convention(cod_contract),
                 self._api.async_fetch_graphic_consumption(cod_contract),
@@ -554,6 +595,7 @@ class ClientFurnizorEon(ClientFurnizor):
                 contract_details,
                 invoice_balance,
                 invoices_unpaid,
+                invoices_paid,
                 meter_index,
                 consumption_convention,
                 graphic_consumption,
@@ -573,19 +615,23 @@ class ClientFurnizorEon(ClientFurnizor):
             adresa = _construieste_adresa(address_obj)
             alias = _alias_din_adresa(adresa, cod_contract)
 
-            ultima_factura = _factura_relevanta(invoices_unpaid, invoice_balance)
+            ultima_factura = _factura_relevanta(invoices_unpaid, invoices_paid, invoice_balance)
 
             istoric_plati = _istoric_plati(payments)
-            ultima_plata = istoric_plati[0] if istoric_plati else None
+            ultima_plata = _ultima_plata(payments)
 
             sold_factura = round(_citeste_sold_factura(invoice_balance), 2)
             factura_restanta = bool((isinstance(invoices_unpaid, list) and len(invoices_unpaid) > 0) or sold_factura > 0)
 
             id_ultima_factura = _id_factura(ultima_factura)
             urmatoarea_scadenta = _ultima_data_scadenta(ultima_factura)
+            data_ultima_factura = _data_emitere_factura(ultima_factura)
 
-            if sold_factura > 0:
-                valoare_ultima_factura = sold_factura
+            if factura_restanta:
+                valoare_ultima_factura = round(sold_factura, 2)
+                tip_ultima_valoare = "factura"
+            elif ultima_factura is not None:
+                valoare_ultima_factura = _valoare_factura(ultima_factura)
                 tip_ultima_valoare = "factura"
             else:
                 valoare_ultima_factura = round(_to_float((ultima_plata or {}).get("valoare"), 0.0), 2)
@@ -620,7 +666,7 @@ class ClientFurnizorEon(ClientFurnizor):
                     "id_ultima_factura": id_ultima_factura,
                     "valoare_ultima_factura": valoare_ultima_factura,
                     "tip_ultima_valoare": tip_ultima_valoare,
-                    "data_ultima_factura": _data_emitere_factura(ultima_factura),
+                    "data_ultima_factura": data_ultima_factura,
                     "urmatoarea_scadenta": urmatoarea_scadenta,
                     "ultima_plata_data": _safe_str((ultima_plata or {}).get("data")) or None,
                     "ultima_plata_valoare": round(_to_float((ultima_plata or {}).get("valoare"), 0.0), 2),
@@ -648,12 +694,13 @@ class ClientFurnizorEon(ClientFurnizor):
                     "invoice_balance": invoice_balance if isinstance(invoice_balance, dict) else {},
                     "invoice_balance_raw": invoice_balance if isinstance(invoice_balance, dict) else {},
                     "invoices_unpaid_raw": invoices_unpaid if isinstance(invoices_unpaid, list) else [],
+                    "invoices_paid_raw": invoices_paid if isinstance(invoices_paid, list) else [],
                 }
             )
 
         total_de_plata = round(sum(_to_float(x.get("de_plata"), 0.0) for x in locuri_consum), 2)
         total_sold_factura = round(sum(_to_float(x.get("sold_factura"), 0.0) for x in locuri_consum), 2)
-        numar_facturi = sum(len(x.get("invoices_unpaid_raw", [])) for x in locuri_consum)
+        numar_facturi = sum(len(x.get("invoices_unpaid_raw", [])) + len(x.get("invoices_paid_raw", [])) for x in locuri_consum)
 
         return {
             "rezumat": {

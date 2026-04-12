@@ -542,7 +542,7 @@ class ClientFurnizorMyElectrica(ClientFurnizor):
                 facturi_model.append(FacturaUtilitate(
                     id_factura=id_factura,
                     titlu=f"Factură {id_factura}",
-                    valoare=round(_safe_float(factura.get("InvoiceAmount") or factura.get("AmountDue")), 2),
+                    valoare=_invoice_amount(factura),
                     moneda="RON",
                     data_emitere=_parse_date(factura.get("IssueDate")),
                     data_scadenta=_parse_date(factura.get("DueDate")),

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 import re
 
@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.const import UnitOfVolume
 
@@ -25,6 +26,7 @@ from .myelectrica_device import alias_loc_myelectrica, info_device_myelectrica, 
 from .deer_device import alias_loc_deer, info_device_deer, slug_loc_deer
 from .naming import build_provider_slug, extract_street_slug, build_location_alias
 from .licentiere import async_obtine_licenta_globala
+from .facturi_agregate import colecteaza_facturi_agregate, sumar_facturi
 from .const import DOMENIU, CONF_FURNIZOR, FURNIZOR_ADMIN_GLOBAL
 
 
@@ -80,6 +82,45 @@ class SenzorAdminStatic(SenzorAdminBaza):
 
     async def _async_refresh_value(self) -> None:
         self._attr_native_value = self._value
+
+
+class SenzorAdminFacturiAgregate(SenzorAdminBaza):
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        super().__init__(entry, "facturi_agregate", "Facturi utilități")
+        self.hass = hass
+        self._attr_icon = "mdi:file-document-multiple-outline"
+        self._attr_entity_category = None
+        self._sumar: dict[str, Any] = {}
+        self._unsub_interval = None
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self._unsub_interval = async_track_time_interval(self.hass, self._async_handle_interval, timedelta(minutes=1))
+
+    async def async_will_remove_from_hass(self) -> None:
+        if self._unsub_interval is not None:
+            self._unsub_interval()
+            self._unsub_interval = None
+
+    async def _async_handle_interval(self, _now) -> None:
+        await self._async_refresh_value()
+        self.async_write_ha_state()
+
+    async def _async_refresh_value(self) -> None:
+        facturi = colecteaza_facturi_agregate(self.hass)
+        self._sumar = sumar_facturi(facturi)
+        self._attr_native_value = self._sumar.get("numar_facturi", 0)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return {
+            "numar_platite": self._sumar.get("numar_platite", 0),
+            "numar_neplatite": self._sumar.get("numar_neplatite", 0),
+            "numar_status_necunoscut": self._sumar.get("numar_status_necunoscut", 0),
+            "total_neplatit": self._sumar.get("total_neplatit", 0),
+            "moneda": self._sumar.get("moneda", "RON"),
+            "locatii": self._sumar.get("locatii", []),
+        }
 
 
 
@@ -762,6 +803,7 @@ async def async_setup_entry(
             SenzorAdminLicenta(entry, "utilizator", "Cont licență"),
             SenzorAdminStatic(entry, "contact", "Contact dezvoltator", "GitHub: @mariusonitiu"),
             SenzorAdminStatic(entry, "support", "Suport", "github.com/onitium/utilitati_romania/issues"),
+            SenzorAdminFacturiAgregate(hass, entry),
         ])
         return
 

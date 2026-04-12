@@ -1,4 +1,4 @@
-# Utilități România – Home Assistant Integration
+# 🇷🇴 Utilități România – Home Assistant Integration
 
 Integrarea **Utilități România** aduce într-un singur loc datele de consum, facturare și interacțiune cu furnizorii de utilități din România, direct în Home Assistant.
 
@@ -50,6 +50,8 @@ Am construit integrarea asta dintr-o nevoie reală: să nu mai intru în mai mul
 - Digi România  
 - Nova Power & Gas  
 
+> ⚠️ Nu toate funcțiile sunt disponibile pentru fiecare furnizor.
+
 ---
 
 ## 📦 Instalare
@@ -60,10 +62,20 @@ Am construit integrarea asta dintr-o nevoie reală: să nu mai intru în mai mul
 2. Mergi la Integrations  
 3. Meniu (⋮) → Custom repositories  
 4. Adaugă:  
-https://github.com/mariusonitiu/utilitati_romania  
+   `https://github.com/mariusonitiu/utilitati_romania`  
 5. Tip: Integration  
 6. Instalează  
 7. Restart Home Assistant  
+
+---
+
+### Instalare manuală
+
+Copiază folderul:
+
+`custom_components/utilitati_romania`
+
+și dă restart Home Assistant.
 
 ---
 
@@ -79,8 +91,8 @@ https://github.com/mariusonitiu/utilitati_romania
 
 ## 🔐 Licență
 
-- 🆓 90 zile trial (complet funcțional)
-- 💎 licență lifetime
+- 90 zile trial (complet funcțional)
+- licență lifetime
 
 După expirare:
 - integrarea rămâne activă
@@ -98,6 +110,7 @@ Acolo ai:
 - Valabilitate
 - Plan
 - Cont licență
+- Informații suport
 
 ---
 
@@ -105,7 +118,40 @@ Acolo ai:
 
 Din UI sau:
 
-service: utilitati_romania.reload_all
+`service: utilitati_romania.reload_all`
+
+---
+
+## ⚠️ Limitări
+
+- unele conturi nu permit trimiterea indexului
+- unele locații nu permit modificări
+- API-urile furnizorilor pot suferi modificări
+
+---
+
+## 🛠 Troubleshooting
+
+**Nu apar entități**
+- restart complet Home Assistant
+- verifică logs
+
+**Entități unavailable**
+- verifică licența
+- verifică autentificarea
+
+---
+
+## 🧾 Diagnostics
+
+Integrarea oferă export complet pentru debugging (fără date sensibile).
+
+---
+
+## 👨‍💻 Autor
+
+Marius Onițiu  
+https://github.com/mariusonitiu  
 
 ---
 
@@ -114,14 +160,7 @@ service: utilitati_romania.reload_all
 Dacă îți este utilă integrarea:
 
 ⭐ lasă un star pe GitHub  
-☕ susține proiectul: https://buymeacoffee.com/mariusonitiu  
-
----
-
-## 👨‍💻 Autor
-
-Marius Onițiu  
-https://github.com/mariusonitiu  
+☕ Buy me a coffee  
 
 ---
 

@@ -41,6 +41,8 @@ from .eon_helper import generate_verify_hmac
 
 _LOGGER = logging.getLogger(__name__)
 
+URL_INVOICES_PAID = "https://api2.eon.ro/invoices/v1/invoices/list-paid"
+
 
 def _mask_email(value: str) -> str:
     """Maschează adresa de email pentru afișare în MFA."""
@@ -486,6 +488,16 @@ class EonApiClient:
             "GET",
             f"{URL_INVOICES_UNPAID}{params}",
             f"invoices_unpaid ({account_contract})",
+        )
+
+
+    async def async_fetch_invoices_paid(self, account_contract: str, max_pages: int | None = None):
+        return await self._paginated_request(
+            base_url=URL_INVOICES_PAID,
+            params={"accountContract": account_contract, "status": "paid"},
+            list_key="list",
+            label=f"invoices_paid ({account_contract})",
+            max_pages=max_pages,
         )
 
     async def async_fetch_invoices_prosum(self, account_contract: str, max_pages: int | None = None):

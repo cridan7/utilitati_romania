@@ -1,14 +1,14 @@
 {
   "domain": "utilitati_romania",
   "name": "Utilitati Romania",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "documentation": "https://github.com/mariusonitiu/utilitati_romania",
   "issue_tracker": "https://github.com/mariusonitiu/utilitati_romania/issues",
   "codeowners": [
     "@mariusonitiu"
   ],
   "config_flow": true,
-  "integration_type": "integration",
+  "integration_type": "service",
   "iot_class": "cloud_polling",
   "requirements": [
     "curl-cffi==0.7.4",
