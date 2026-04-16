@@ -15,7 +15,7 @@ Centralizează facturi, notificări și transmiterea indexului într-un singur l
   - deschiderea perioadei de citire a indexului
 - ✍️ Transmitere index direct din dashboard
 - 🧠 Detectare automată perioadă de citire
-- 🔑 Sistem de licențiere integrat (trial + lifetime)
+- 🔑 Sistem de licențiere integrat (trial 90 zile + lifetime)
 - 🧩 Integrare nativă Home Assistant
 
 ---
@@ -83,7 +83,7 @@ type: custom:utilitati-romania-facturi-card
 
 ## 🔑 Licență
 
-- Trial inclus
+- Trial 90 zile inclus
 - Upgrade la lifetime
 
 ---
