@@ -228,7 +228,7 @@ class ClientFurnizorEbloc(ClientFurnizor):
                     nume=f"{nume_asoc} - Ap. {ap.get('ap') or ap.get('nr_ap') or id_ap}",
                     tip_cont='apartament',
                     id_contract=str(id_asoc),
-                    adresa=f"{nume_asoc} - Ap. {ap.get('ap') or ap.get('nr_ap') or id_ap}",
+                    adresa=_adresa_asociatie(assoc, ap) or f"{nume_asoc} - Ap. {ap.get('ap') or ap.get('nr_ap') or id_ap}",
                     stare='restant' if total_plata > 0 else 'activ',
                     tip_utilitate='intretinere',
                     tip_serviciu='administrare imobil',
@@ -238,6 +238,7 @@ class ClientFurnizorEbloc(ClientFurnizor):
                         'apartament': str(ap.get('ap') or ap.get('nr_ap') or id_ap),
                         'numar_apartament': str(ap.get('ap') or ap.get('nr_ap') or id_ap),
                         'nume_asociatie': nume_asoc,
+                        'adresa': _adresa_asociatie(assoc, ap),
                         'asociatie_bruta': assoc,
                         'apartament_brut': ap,
                         'home': home,
@@ -281,3 +282,60 @@ class ClientFurnizorEbloc(ClientFurnizor):
                 'luna': data.get('luna'),
             },
         )
+
+def _extract_first_text(value: Any, preferred_keys: tuple[str, ...]) -> str | None:
+    seen: set[int] = set()
+
+    def _walk(node: Any) -> str | None:
+        node_id = id(node)
+        if node_id in seen:
+            return None
+        seen.add(node_id)
+
+        if isinstance(node, dict):
+            lowered = {str(k).lower(): v for k, v in node.items()}
+            for key in preferred_keys:
+                if key in lowered:
+                    text = str(lowered[key] or '').strip()
+                    if text and text.lower() not in {'null', 'none'}:
+                        return text
+            for value in node.values():
+                found = _walk(value)
+                if found:
+                    return found
+            return None
+
+        if isinstance(node, list):
+            for item in node:
+                found = _walk(item)
+                if found:
+                    return found
+            return None
+
+        return None
+
+    return _walk(value)
+
+
+def _adresa_asociatie(asociatie: dict[str, Any], apartament: dict[str, Any]) -> str | None:
+    preferred = (
+        'adresa',
+        'address',
+        'full_address',
+        'service_address',
+        'street',
+        'strada',
+        'adr',
+        'adres',
+    )
+    baza = _extract_first_text(apartament, preferred) or _extract_first_text(asociatie, preferred)
+    ap = str(apartament.get('ap') or apartament.get('nr_ap') or apartament.get('apartament') or '').strip()
+    if baza and ap:
+        lower_baza = baza.lower()
+        if f'ap. {ap.lower()}' in lower_baza or f'ap {ap.lower()}' in lower_baza:
+            return baza
+        return f"{baza} - Ap. {ap}"
+    if baza:
+        return baza
+    return None
+

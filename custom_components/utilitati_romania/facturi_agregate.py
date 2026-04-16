@@ -433,6 +433,113 @@ def _build_eon_fallback_item(
     }
 
 
+
+
+def _money_to_lei(value: Any) -> float | None:
+    parsed = _to_float(value)
+    if parsed is None:
+        return None
+    # eBloc sumele brute vin frecvent în bani (ex. 201496700 pentru 2.014.967,00?)
+    # sau în lei deja normalizați. Considerăm "bani" doar valorile întregi mari.
+    if isinstance(value, str):
+        raw = value.strip().replace(' ', '')
+        if raw.isdigit() and len(raw) >= 4:
+            return round(float(raw) / 100.0, 2)
+    if isinstance(value, int) and abs(value) >= 1000:
+        return round(float(value) / 100.0, 2)
+    return round(parsed, 2)
+
+
+def _ebloc_latest_payment_from_raw(cont_raw: dict[str, Any]) -> tuple[float | None, str | None]:
+    plati_raw = cont_raw.get('plati_brute') if isinstance(cont_raw.get('plati_brute'), dict) else {}
+    chitante = plati_raw.get('aChitante') if isinstance(plati_raw, dict) else None
+    if not isinstance(chitante, list) or not chitante:
+        return None, None
+    latest = chitante[0] if isinstance(chitante[0], dict) else {}
+    amount = _money_to_lei(latest.get('suma'))
+    payment_date = _format_date(latest.get('data'))
+    return amount, payment_date
+
+
+def _build_ebloc_fallback_item(
+    coordonator: CoordonatorUtilitatiRomania,
+    instantaneu: InstantaneuFurnizor,
+    cont: ContUtilitate,
+) -> dict[str, Any] | None:
+    id_cont = getattr(cont, 'id_cont', None)
+    if not id_cont:
+        return None
+
+    cont_raw = cont.date_brute if isinstance(cont.date_brute, dict) else {}
+    de_plata = _to_float(_consum_value(instantaneu, 'de_plata', id_cont) or cont_raw.get('de_plata'))
+    sold_curent = _to_float(_consum_value(instantaneu, 'sold_curent', id_cont) or cont_raw.get('sold_curent'))
+    factura_restanta = _consum_value(instantaneu, 'factura_restanta', id_cont) or cont_raw.get('factura_restanta')
+    due_date = _format_date(_consum_value(instantaneu, 'urmatoarea_scadenta', id_cont) or cont_raw.get('data_scadenta'))
+
+    latest_payment_amount = _to_float(_consum_value(instantaneu, 'valoare_ultima_plata', id_cont))
+    latest_payment_date = _format_date(_consum_value(instantaneu, 'data_ultima_plata', id_cont))
+    if latest_payment_amount is None:
+        latest_payment_amount, raw_payment_date = _ebloc_latest_payment_from_raw(cont_raw)
+        if latest_payment_date is None:
+            latest_payment_date = raw_payment_date
+
+    # Dacă e plătită, în card trebuie afișată ultima plată, nu soldul curent.
+    restanta_text = normalize_text(factura_restanta).lower()
+    has_unpaid = False
+    if restanta_text in {'da', 'yes', 'true', '1'}:
+        has_unpaid = True
+    elif de_plata is not None and de_plata > 0:
+        has_unpaid = True
+    elif sold_curent is not None and sold_curent > 0:
+        has_unpaid = True
+
+    if has_unpaid:
+        status = 'unpaid'
+        is_paid = False
+        unpaid_amount = de_plata if de_plata is not None and de_plata > 0 else sold_curent
+        amount = unpaid_amount
+        issue_date = None
+        invoice_title = f"Întreținere {cont_raw.get('numar_apartament') or ''}".strip()
+        status_raw = factura_restanta or 'Da'
+    else:
+        status = 'paid'
+        is_paid = True
+        unpaid_amount = 0.0
+        amount = latest_payment_amount
+        issue_date = latest_payment_date
+        invoice_title = 'Ultima plată'
+        status_raw = factura_restanta or 'Nu'
+
+    if amount is None and due_date is None and issue_date is None:
+        return None
+
+    return {
+        'entry_id': coordonator.intrare.entry_id,
+        'entry_title': coordonator.intrare.title,
+        'furnizor': instantaneu.furnizor,
+        'furnizor_label': _provider_label(instantaneu.furnizor),
+        'locatie_cheie': normalize_facturi_location_key(cont),
+        'eticheta_locatie': build_facturi_location_label(cont),
+        'adresa_originala': getattr(cont, 'adresa', None),
+        'id_cont': id_cont,
+        'id_contract': getattr(cont, 'id_contract', None),
+        'nume_cont': getattr(cont, 'nume', None),
+        'tip_utilitate': getattr(cont, 'tip_utilitate', None),
+        'tip_serviciu': getattr(cont, 'tip_serviciu', None),
+        'invoice_id': f'ebloc_{id_cont}_summary',
+        'invoice_title': invoice_title or 'Situație curentă',
+        'issue_date': issue_date,
+        'due_date': due_date,
+        'amount': amount,
+        'currency': 'RON',
+        'status_raw': status_raw,
+        'status': status,
+        'payment_status': status,
+        'is_paid': is_paid,
+        'unpaid_amount': unpaid_amount,
+        'pdf_url': None,
+    }
+
 def colecteaza_facturi_agregate(hass) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str], dict[str, Any]] = {}
     domain_data = hass.data.get(DOMENIU, {}) if hasattr(hass, "data") else {}
@@ -504,6 +611,27 @@ def colecteaza_facturi_agregate(hass) -> list[dict[str, Any]]:
                         current["invoice_id"] = fallback_item.get("invoice_id")
                     if fallback_item.get("invoice_title"):
                         current["invoice_title"] = fallback_item.get("invoice_title")
+
+        # 3. Fallback specific eBloc: dacă nu există facturi clasice, afișăm
+        # întreținerea curentă sau ultima plată, în funcție de status.
+        if instantaneu.furnizor == "ebloc":
+            for cont in instantaneu.conturi or []:
+                fallback_item = _build_ebloc_fallback_item(maybe_coord, instantaneu, cont)
+                if fallback_item is None:
+                    continue
+
+                group_key = (
+                    fallback_item["locatie_cheie"],
+                    normalize_text(fallback_item["furnizor"]).lower(),
+                )
+
+                current = grouped.get(group_key)
+                if current is None:
+                    grouped[group_key] = fallback_item
+                    continue
+
+                # eBloc nu expune facturi clasice consistente; fallback-ul este sursa de adevăr.
+                grouped[group_key] = fallback_item
 
     items = list(grouped.values())
     items.sort(

@@ -11,17 +11,12 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       ...config,
     };
 
-    if (!this._expanded) {
-      this._expanded = {};
-    }
-
-    if (typeof this._licenseExpanded !== "boolean") {
-      this._licenseExpanded = false;
-    }
-
-    if (typeof this._licenseInputValue !== "string") {
-      this._licenseInputValue = "";
-    }
+    if (!this._expanded) this._expanded = {};
+    if (typeof this._licenseExpanded !== "boolean") this._licenseExpanded = false;
+    if (typeof this._licenseInputValue !== "string") this._licenseInputValue = "";
+    if (!this._actionState) this._actionState = {};
+    if (!this._readingCache) this._readingCache = new Map();
+    if (!this._lastHassStateVersion) this._lastHassStateVersion = 0;
 
     this._licenseInputEntityId = null;
     this._licenseApplyEntityId = null;
@@ -33,7 +28,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
   }
 
   getCardSize() {
-    return this._config.show_license ? 10 : 8;
+    return this._config.show_license ? 12 : 10;
   }
 
   _findEntityId() {
@@ -46,14 +41,9 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
     }
 
     const candidates = Object.keys(this._hass.states).filter((entityId) => {
-      if (!entityId.startsWith("sensor.")) {
-        return false;
-      }
+      if (!entityId.startsWith("sensor.")) return false;
       const stateObj = this._hass.states[entityId];
-      if (!stateObj) {
-        return false;
-      }
-      const attrs = stateObj.attributes || {};
+      const attrs = stateObj?.attributes || {};
       return Array.isArray(attrs.locatii);
     });
 
@@ -62,12 +52,10 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
 
   _normalizeStatus(value) {
     const text = String(value ?? "").trim().toLowerCase();
-
     if (!text) return "unknown";
     if (["paid", "platita", "plătită", "platit", "achitata", "achitată"].includes(text)) return "paid";
     if (["unpaid", "neplatita", "neplătită", "neplatit", "restanta", "restanță", "de_plata", "de plată"].includes(text)) return "unpaid";
     if (["credit", "prosumator"].includes(text)) return "credit";
-
     return text;
   }
 
@@ -80,14 +68,9 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
 
   _formatDate(value) {
     if (!value || value === "-") return "—";
-
     const text = String(value).trim();
     if (!text) return "—";
-
-    if (/^\d{2}\.\d{2}\.\d{4}$/.test(text)) {
-      return text;
-    }
-
+    if (/^\d{2}\.\d{2}\.\d{4}$/.test(text)) return text;
     const parsed = new Date(text);
     if (!Number.isNaN(parsed.getTime())) {
       try {
@@ -96,31 +79,38 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
         return text;
       }
     }
-
     return text;
   }
 
-  _toNumber(value) {
-    if (typeof value === "number") {
-      return Number.isFinite(value) ? value : 0;
+  _formatDateTime(value) {
+    if (!value || value === "-") return "—";
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) {
+      try {
+        return new Intl.DateTimeFormat("ro-RO", {
+          dateStyle: "short",
+          timeStyle: "short",
+        }).format(parsed);
+      } catch (_err) {
+        return this._formatDate(value);
+      }
     }
+    return this._formatDate(value);
+  }
 
+  _toNumber(value) {
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
     if (typeof value === "string") {
       const normalized = value.replace(/\s/g, "").replace(",", ".");
       const parsed = Number(normalized);
       return Number.isFinite(parsed) ? parsed : 0;
     }
-
     return 0;
   }
 
   _formatMoney(value, currency = "RON") {
-    if (value === null || value === undefined || value === "") {
-      return "—";
-    }
-
+    if (value === null || value === undefined || value === "") return "—";
     const amount = this._toNumber(value);
-
     try {
       return new Intl.NumberFormat("ro-RO", {
         style: "currency",
@@ -145,6 +135,44 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
     return this._escapeHtml(value);
   }
 
+  _normalizeText(value) {
+    return String(value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  _makeKey(...parts) {
+    return parts.map((part) => String(part ?? "")).join("__");
+  }
+
+  _parseDateLike(value) {
+    if (!value) return null;
+    const text = String(value).trim();
+    if (!text) return null;
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      return new Date(`${text}T00:00:00`);
+    }
+    if (/^\d{4}-\d{2}-\d{2}T/.test(text)) {
+      return new Date(text);
+    }
+    if (/^\d{2}\.\d{2}\.\d{4}$/.test(text)) {
+      const [dd, mm, yyyy] = text.split(".");
+      return new Date(`${yyyy}-${mm}-${dd}T00:00:00`);
+    }
+
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  _todayDate() {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  }
+
   _filterLocations(locations) {
     const onlyUnpaid = !!this._config.only_unpaid;
     const showPaid = this._config.show_paid !== false;
@@ -152,29 +180,15 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
     return locations
       .map((location) => {
         const providers = Array.isArray(location.furnizori) ? location.furnizori : [];
-
         const filteredProviders = providers.filter((provider) => {
           const status = this._normalizeStatus(provider.status || provider.payment_status || provider.status_raw);
-
-          if (onlyUnpaid) {
-            return status === "unpaid";
-          }
-
-          if (!showPaid && status === "paid") {
-            return false;
-          }
-
+          if (onlyUnpaid) return status === "unpaid";
+          if (!showPaid && status === "paid") return false;
           return true;
         });
 
-        if (!filteredProviders.length) {
-          return null;
-        }
-
-        return {
-          ...location,
-          furnizori: filteredProviders,
-        };
+        if (!filteredProviders.length) return null;
+        return { ...location, furnizori: filteredProviders };
       })
       .filter(Boolean);
   }
@@ -227,6 +241,391 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
     return provider.invoice_title || provider.invoice_id || "Ultima factură";
   }
 
+  _entityFriendlyText(stateObj) {
+    const friendly = stateObj?.attributes?.friendly_name || "";
+    return this._normalizeText(`${stateObj?.entity_id || ""} ${friendly}`);
+  }
+
+  _textMatchesAny(text, terms) {
+    const hay = this._normalizeText(text || "");
+    return (terms || []).some((term) => term && hay.includes(term));
+  }
+
+  _readingTerms(location, provider) {
+    const values = [
+      location?.eticheta_locatie,
+      provider?.nume_cont,
+      provider?.adresa_originala,
+      provider?.invoice_title,
+    ];
+
+    const normalized = values
+      .map((value) => this._normalizeText(value))
+      .filter(Boolean);
+
+    const extra = [];
+    for (const value of normalized) {
+      const noNumbers = value.replace(/\b\d+\b/g, " ").replace(/\s+/g, " ").trim();
+      if (noNumbers && noNumbers !== value) extra.push(noNumbers);
+    }
+
+    return Array.from(new Set([...normalized, ...extra])).filter((value) => value.length >= 3);
+  }
+
+  _findReadingSensor(location, provider) {
+    const providerKey = String(provider?.furnizor || "").toLowerCase();
+    const targetIdCont = String(provider?.id_cont ?? "").trim();
+    const targetIdContract = String(provider?.id_contract ?? "").trim();
+    const terms = this._readingTerms(location, provider);
+
+    const candidates = Object.values(this._hass?.states || {}).filter((stateObj) => {
+      if (!stateObj?.entity_id?.startsWith("sensor.")) return false;
+      const entityId = stateObj.entity_id;
+      const attrs = stateObj.attributes || {};
+      const text = this._entityFriendlyText(stateObj);
+
+      return !!(
+        entityId.includes("citire_permisa") ||
+        text.includes("citire permisa") ||
+        attrs.inceput_perioada || attrs.sfarsit_perioada || attrs["Perioadă start"] || attrs["Perioadă sfârșit"]
+      );
+    });
+
+    let best = null;
+    let bestScore = -1;
+
+    for (const stateObj of candidates) {
+      const entityId = stateObj.entity_id;
+      const attrs = stateObj.attributes || {};
+      const text = this._entityFriendlyText(stateObj);
+      let score = 0;
+
+      if (providerKey && (entityId.includes(providerKey) || text.includes(providerKey.replace(/_/g, " ")))) score += 20;
+
+      const attrIdCont = String(attrs.id_cont ?? "").trim();
+      if (targetIdCont && attrIdCont && attrIdCont === targetIdCont) score += 100;
+
+      const attrContract = String(attrs.id_contract ?? attrs.cod_contract ?? "").trim();
+      if (targetIdContract && attrContract && attrContract === targetIdContract) score += 80;
+
+      const attrAddress = this._normalizeText(attrs.adresa || attrs["Adresă"] || attrs.apartament || attrs.nume_cont || "");
+      if (attrAddress && this._textMatchesAny(attrAddress, terms)) score += 50;
+
+      if (this._textMatchesAny(text, terms)) score += 60;
+
+      if (score > bestScore) {
+        best = stateObj;
+        bestScore = score;
+      }
+    }
+
+    return bestScore > 0 ? best : null;
+  }
+
+  _extractWindowInfo(sensorState) {
+    if (!sensorState) return { isOpen: false, start: null, end: null };
+
+    const attrs = sensorState.attributes || {};
+    const startRaw =
+      attrs.inceput_perioada ||
+      attrs["inceput_perioada"] ||
+      attrs["Perioadă start"] ||
+      attrs.StartDatePAC ||
+      attrs.start_date ||
+      null;
+    const endRaw =
+      attrs.sfarsit_perioada ||
+      attrs["sfarsit_perioada"] ||
+      attrs["Perioadă sfârșit"] ||
+      attrs.EndDatePAC ||
+      attrs.end_date ||
+      null;
+
+    const startDate = this._parseDateLike(startRaw);
+    const endDate = this._parseDateLike(endRaw);
+    const today = this._todayDate();
+
+    let openByRange = false;
+    if (startDate && endDate) {
+      openByRange = today >= new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate()) && today <= new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+    }
+
+    const stateText = this._normalizeText(sensorState.state);
+    const truthyState = ["da", "yes", "true", "on", "activ", "disponibil", "permisa", "permis"].includes(stateText);
+
+    return {
+      isOpen: openByRange || truthyState,
+      start: startRaw || null,
+      end: endRaw || null,
+    };
+  }
+
+  _deriveControlsFromReadingSensor(location, provider, readingSensor) {
+    if (!readingSensor) return [];
+
+    const providerKey = String(provider?.furnizor || "").toLowerCase();
+    const sensorEntityId = readingSensor.entity_id || "";
+    const sensorObject = sensorEntityId.replace(/^sensor\./, "");
+    const states = this._hass?.states || {};
+    const readingText = this._entityFriendlyText(readingSensor);
+    const terms = this._readingTerms(location, provider);
+
+    const controls = [];
+
+    if (providerKey === "hidroelectrica") {
+      const base = sensorObject.replace(/_citire_permisa$/, "");
+      const numberEntityId = `number.${base}_index_energie_electrica`;
+      const buttonEntityId = `button.${base}_trimite_index`;
+      const currentEntityId = `sensor.${base}_index_energie_electrica`;
+      controls.push({
+        key: `${providerKey}_${provider.id_cont || base}`,
+        label: "Index de transmis",
+        numberEntityId,
+        buttonEntityId,
+        currentEntityId,
+      });
+      return controls;
+    }
+
+    if (providerKey === "eon") {
+      const base = sensorObject.replace(/_citire_permisa$/, "");
+      let numberEntity = Object.values(states).find((stateObj) => stateObj.entity_id.startsWith("number.") && stateObj.entity_id.includes(`${base}_index`));
+      if (!numberEntity) {
+        numberEntity = Object.values(states).find((stateObj) => {
+          if (!stateObj.entity_id.startsWith("number.")) return false;
+          const text = this._entityFriendlyText(stateObj);
+          return this._textMatchesAny(text, terms) && (text.includes("index gaz") || text.includes("index energie") || text.includes("index"));
+        });
+      }
+      let currentEntity = Object.values(states).find((stateObj) => stateObj.entity_id.startsWith("sensor.") && (stateObj.entity_id === `sensor.${base}_index_contor` || stateObj.entity_id === `sensor.${base}_index_energie_electrica` || stateObj.entity_id === `sensor.${base}_index_gaz`));
+      if (!currentEntity) {
+        currentEntity = Object.values(states).find((stateObj) => {
+          if (!stateObj.entity_id.startsWith("sensor.")) return false;
+          const text = this._entityFriendlyText(stateObj);
+          return this._textMatchesAny(text, terms) && (text.includes(" index ") || text.includes("index gaz") || text.includes("index energie") || text.includes("index contor"));
+        });
+      }
+      const buttonEntity = Object.values(states).find((stateObj) => {
+        if (!stateObj.entity_id.startsWith("button.")) return false;
+        const text = this._entityFriendlyText(stateObj);
+        return text.includes("trimite index") && (this._textMatchesAny(text, terms) || text.includes(readingText));
+      });
+      if (numberEntity && buttonEntity) {
+        controls.push({
+          key: `${providerKey}_${provider.id_cont || base}`,
+          label: "Index de transmis",
+          numberEntityId: numberEntity.entity_id,
+          buttonEntityId: buttonEntity.entity_id,
+          currentEntityId: currentEntity?.entity_id || null,
+        });
+      }
+      return controls;
+    }
+
+    if (providerKey === "myelectrica") {
+      const parts = sensorObject.split("_");
+      const slug = parts.slice(3, -1).join("_");
+      const numberEntityId = `number.utilitati_romania_myelectrica_${slug}_index_contor`;
+      const numberEntity = states[numberEntityId] || null;
+      let currentEntity = Object.values(states).find((stateObj) => {
+        if (!stateObj.entity_id.startsWith("sensor.")) return false;
+        const attrs = stateObj.attributes || {};
+        return String(attrs.id_cont ?? "") === String(provider.id_cont ?? "") && (stateObj.entity_id.includes("index_contor") || this._entityFriendlyText(stateObj).includes("index contor"));
+      });
+      if (!currentEntity) {
+        currentEntity = Object.values(states).find((stateObj) => {
+          if (!stateObj.entity_id.startsWith("sensor.")) return false;
+          const text = this._entityFriendlyText(stateObj);
+          return this._textMatchesAny(text, terms) && (text.includes("index contor") || text.includes("index"));
+        });
+      }
+      const buttonEntity = Object.values(states).find((stateObj) => {
+        if (!stateObj.entity_id.startsWith("button.")) return false;
+        const text = this._entityFriendlyText(stateObj);
+        return text.includes("trimite index") && this._textMatchesAny(text, terms);
+      });
+      if (numberEntity && buttonEntity) {
+        controls.push({
+          key: `${providerKey}_${provider.id_cont || slug}`,
+          label: "Index de transmis",
+          numberEntityId,
+          buttonEntityId: buttonEntity.entity_id,
+          currentEntityId: currentEntity?.entity_id || null,
+        });
+      }
+      return controls;
+    }
+
+    if (providerKey === "ebloc") {
+      const base = sensorObject.replace(/_citire_permisa$/, "");
+      const numberEntities = Object.values(states).filter((stateObj) => stateObj.entity_id.startsWith(`number.${base}_index_`) && stateObj.entity_id.endsWith("_de_trimis"));
+      const buttonEntities = Object.values(states).filter((stateObj) => stateObj.entity_id.startsWith("button."));
+      numberEntities.forEach((numberEntity, index) => {
+        const friendly = String(numberEntity.attributes?.friendly_name || "Index");
+        const meterLabel = friendly.replace(/^index\s+/i, "").replace(/\s+de trimis$/i, "").trim() || `Contor ${index + 1}`;
+        const meterLabelNorm = this._normalizeText(meterLabel);
+        const buttonEntity = buttonEntities.find((candidate) => {
+          const text = this._entityFriendlyText(candidate);
+          return text.includes("trimite index") && text.includes(meterLabelNorm);
+        });
+        const currentEntity = Object.values(states).find((stateObj) => stateObj.entity_id.startsWith(`sensor.${base}_index_`) && this._entityFriendlyText(stateObj).includes(meterLabelNorm));
+        if (buttonEntity) {
+          controls.push({
+            key: `${providerKey}_${provider.id_cont || base}_${meterLabelNorm}`,
+            label: meterLabel,
+            numberEntityId: numberEntity.entity_id,
+            buttonEntityId: buttonEntity.entity_id,
+            currentEntityId: currentEntity?.entity_id || null,
+          });
+        }
+      });
+      return controls;
+    }
+
+    return [];
+  }
+
+  _getReadingData(location, provider) {
+    const cacheKey = this._makeKey(location.locatie_cheie, provider.furnizor, provider.id_cont, provider.id_contract);
+    if (this._readingCache.has(cacheKey)) return this._readingCache.get(cacheKey);
+
+    const readingSensor = this._findReadingSensor(location, provider);
+    if (!readingSensor) {
+      const empty = { available: false, isOpen: false, controls: [], start: null, end: null, badge: null };
+      this._readingCache.set(cacheKey, empty);
+      return empty;
+    }
+
+    const windowInfo = this._extractWindowInfo(readingSensor);
+    const controls = this._deriveControlsFromReadingSensor(location, provider, readingSensor).map((control) => {
+      const numberState = control.numberEntityId ? this._hass.states[control.numberEntityId] : null;
+      const currentState = control.currentEntityId ? this._hass.states[control.currentEntityId] : null;
+      return {
+        ...control,
+        numberState,
+        currentState,
+        unit: numberState?.attributes?.unit_of_measurement || currentState?.attributes?.unit_of_measurement || "",
+        currentValue: currentState ? currentState.state : null,
+      };
+    });
+
+    const result = {
+      available: true,
+      isOpen: !!windowInfo.isOpen,
+      start: windowInfo.start,
+      end: windowInfo.end,
+      badge: windowInfo.isOpen ? "Perioadă citire activă" : null,
+      readingSensorEntityId: readingSensor.entity_id,
+      controls,
+    };
+
+    this._readingCache.set(cacheKey, result);
+    return result;
+  }
+
+  _getAnyOpenReadingForLocation(location) {
+    const providers = Array.isArray(location.furnizori) ? location.furnizori : [];
+    for (const provider of providers) {
+      const data = this._getReadingData(location, provider);
+      if (data.isOpen) return data;
+    }
+    return null;
+  }
+
+  _buildReadingBadge(text) {
+    return `<span class="reading-badge">${this._escapeHtml(text)}</span>`;
+  }
+
+  _actionStateKey(type, entityId) {
+    return `${type}__${entityId}`;
+  }
+
+  _getActionState(type, entityId) {
+    return this._actionState[this._actionStateKey(type, entityId)] || { status: "idle", message: "" };
+  }
+
+  _setActionState(type, entityId, patch) {
+    const key = this._actionStateKey(type, entityId);
+    this._actionState[key] = {
+      ...(this._actionState[key] || { status: "idle", message: "" }),
+      ...patch,
+    };
+  }
+
+  async _sleep(ms) {
+    await new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  async _refreshEntities(entityIds = []) {
+    const ids = Array.from(new Set((entityIds || []).filter(Boolean)));
+    if (!ids.length) return;
+    try {
+      await this._hass.callService("homeassistant", "update_entity", { entity_id: ids });
+    } catch (_err) {
+      // ignorăm erorile de refresh punctual; cardul se va reîmprospăta oricum la următorul update HA
+    }
+  }
+
+  _buildReadingControls(location, provider) {
+    const data = this._getReadingData(location, provider);
+    if (!data.isOpen || !data.controls.length) return "";
+
+    const periodText = data.start && data.end
+      ? `Perioadă activă: ${this._formatDate(data.start)} – ${this._formatDate(data.end)}`
+      : (data.end ? `Poți transmite până în ${this._formatDate(data.end)}` : "Perioada de transmitere este activă.");
+
+    const controlsHtml = data.controls
+      .map((control) => {
+        const action = this._getActionState("reading", control.buttonEntityId);
+        const disabled = action.status === "sending";
+        const numberValue = control.numberState?.state && !["unknown", "unavailable"].includes(control.numberState.state)
+          ? control.numberState.state
+          : "";
+        const currentText = control.currentValue && !["unknown", "unavailable"].includes(control.currentValue)
+          ? `${control.currentValue}${control.unit ? ` ${control.unit}` : ""}`
+          : "—";
+
+        return `
+          <div class="reading-control" data-number-entity="${this._escapeAttr(control.numberEntityId || "")}" data-button-entity="${this._escapeAttr(control.buttonEntityId || "")}">
+            <div class="reading-control-header">
+              <div class="reading-control-title">${this._escapeHtml(control.label || "Index")}</div>
+              <div class="reading-control-current">Index curent: ${this._escapeHtml(currentText)}</div>
+            </div>
+            <div class="reading-control-editor">
+              <input
+                class="reading-input"
+                type="number"
+                step="any"
+                inputmode="decimal"
+                value="${this._escapeAttr(numberValue)}"
+                placeholder="Introduceți indexul"
+                ${disabled ? "disabled" : ""}
+              />
+              <button class="reading-submit-btn" ${disabled ? "disabled" : ""}>
+                ${disabled ? "Se trimite..." : "Trimite index"}
+              </button>
+            </div>
+            ${
+              action.status === "success"
+                ? `<div class="inline-status status-success">${this._escapeHtml(action.message || "Index trimis cu succes.")}</div>`
+                : action.status === "error"
+                  ? `<div class="inline-status status-error">${this._escapeHtml(action.message || "Transmiterea a eșuat.")}</div>`
+                  : ""
+            }
+          </div>
+        `;
+      })
+      .join("");
+
+    return `
+      <div class="reading-wrap">
+        <div class="reading-title">Transmitere index</div>
+        <div class="reading-period">${this._escapeHtml(periodText)}</div>
+        ${controlsHtml}
+      </div>
+    `;
+  }
+
   _buildProviderRow(location, provider, index) {
     const supplier = provider.furnizor_label || provider.furnizor || "Furnizor";
     const title = this._providerCompactTitle(provider);
@@ -237,6 +636,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
     const dueDate = this._formatDate(provider.due_date || provider.data_scadenta);
     const tipServiciu = provider.tip_serviciu || "—";
     const numeCont = provider.nume_cont || "—";
+    const readingData = this._getReadingData(location, provider);
 
     const key = this._rowKey(location, provider, index);
     const expanded = this._isExpanded(key);
@@ -245,12 +645,17 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
     if (status === "paid") statusClass = "status-paid";
     else if (status === "unpaid") statusClass = "status-unpaid";
     else if (status === "credit") statusClass = "status-credit";
+    const isUnpaid = status === "unpaid";
 
     return `
-      <div class="invoice-row-wrap">
+      <div class="invoice-row-wrap ${isUnpaid ? 'invoice-unpaid' : ''}">
         <div class="invoice-row">
           <div class="row-main">
-            <div class="row-supplier">${this._escapeHtml(supplier)}</div>
+            <div class="row-supplier">
+              ${this._escapeHtml(supplier)}
+              ${isUnpaid ? '<span class="badge-unpaid">DE PLATĂ</span>' : ''}
+              ${readingData.isOpen ? this._buildReadingBadge("Citire deschisă") : ""}
+            </div>
             <div class="row-title">${this._escapeHtml(title)}</div>
           </div>
 
@@ -270,11 +675,8 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
                 <div><span class="detail-label">Data scadenței:</span> <span class="detail-value">${this._escapeHtml(dueDate)}</span></div>
                 <div><span class="detail-label">Serviciu:</span> <span class="detail-value">${this._escapeHtml(tipServiciu)}</span></div>
                 <div><span class="detail-label">Cont:</span> <span class="detail-value">${this._escapeHtml(numeCont)}</span></div>
-                ${
-                  provider.pdf_url
-                    ? `<div class="detail-actions"><button class="pdf-btn" data-url="${this._escapeAttr(provider.pdf_url)}">Deschide PDF</button></div>`
-                    : ""
-                }
+                ${provider.pdf_url ? `<div class="detail-actions"><button class="pdf-btn" data-url="${this._escapeAttr(provider.pdf_url)}">Deschide PDF</button></div>` : ""}
+                ${this._buildReadingControls(location, provider)}
               </div>
             `
             : ""
@@ -296,10 +698,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       if (!entityId.startsWith(`${domain}.`)) continue;
       const friendly = String(stateObj?.attributes?.friendly_name || "").trim().toLowerCase();
       if (!friendly) continue;
-
-      if (wanted.some((name) => friendly.includes(name))) {
-        return stateObj;
-      }
+      if (wanted.some((name) => friendly.includes(name))) return stateObj;
     }
 
     return null;
@@ -398,15 +797,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       ["aplică licență"]
     );
 
-    const hasVisibleData =
-      !!statusEntity ||
-      !!planEntity ||
-      !!expiresEntity ||
-      !!checkedEntity ||
-      !!userEntity ||
-      !!messageEntity ||
-      !!inputEntity ||
-      !!applyButtonEntity;
+    const hasVisibleData = !!statusEntity || !!planEntity || !!expiresEntity || !!checkedEntity || !!userEntity || !!messageEntity || !!inputEntity || !!applyButtonEntity;
 
     return {
       hasVisibleData,
@@ -431,27 +822,21 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
   }
 
   _buildLicenseSection() {
-    if (!this._config.show_license) {
-      return "";
-    }
+    if (!this._config.show_license) return "";
 
     const data = this._getLicenseData();
-    if (!data.hasVisibleData) {
-      return "";
-    }
+    if (!data.hasVisibleData) return "";
 
     this._licenseInputEntityId = data.inputEntityId;
     this._licenseApplyEntityId = data.applyButtonEntityId;
+    if (!this._licenseInputValue) this._licenseInputValue = data.inputValue || "";
 
-    if (!this._licenseInputValue) {
-      this._licenseInputValue = data.inputValue || "";
-    }
-
+    const action = data.applyButtonEntityId ? this._getActionState("license", data.applyButtonEntityId) : { status: "idle", message: "" };
     const statusText = data.status || "—";
     const statusClass = this._licenseStatusClass(data.status);
     const planText = data.plan || "—";
     const expiresText = data.expires ? this._formatDate(data.expires) : "—";
-    const checkedText = data.checkedAt ? this._formatDate(data.checkedAt) : "—";
+    const checkedText = data.checkedAt ? this._formatDateTime(data.checkedAt) : "—";
     const userText = data.user || "—";
     const messageText = data.message && data.message !== "-" ? data.message : null;
 
@@ -476,11 +861,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
                 <div><span class="detail-label">Valabilă până la:</span> <span class="detail-value">${this._escapeHtml(expiresText)}</span></div>
                 <div><span class="detail-label">Ultima verificare:</span> <span class="detail-value">${this._escapeHtml(checkedText)}</span></div>
                 <div><span class="detail-label">Cont licență:</span> <span class="detail-value">${this._escapeHtml(userText)}</span></div>
-                ${
-                  messageText
-                    ? `<div><span class="detail-label">Mesaj:</span> <span class="detail-value">${this._escapeHtml(messageText)}</span></div>`
-                    : ""
-                }
+                ${messageText ? `<div><span class="detail-label">Mesaj:</span> <span class="detail-value">${this._escapeHtml(messageText)}</span></div>` : ""}
                 ${
                   data.inputEntityId && data.applyButtonEntityId
                     ? `
@@ -492,11 +873,19 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
                           autocomplete="off"
                           placeholder="Introduceți codul licenței"
                           value="${this._escapeAttr(this._licenseInputValue)}"
+                          ${action.status === "sending" ? "disabled" : ""}
                         />
-                        <button class="license-btn apply-license-btn">Aplică</button>
+                        <button class="license-btn apply-license-btn" ${action.status === "sending" ? "disabled" : ""}>${action.status === "sending" ? "Se aplică..." : "Aplică"}</button>
                       </div>
                     `
                     : ""
+                }
+                ${
+                  action.status === "success"
+                    ? `<div class="inline-status status-success">${this._escapeHtml(action.message || "Licența a fost actualizată.")}</div>`
+                    : action.status === "error"
+                      ? `<div class="inline-status status-error">${this._escapeHtml(action.message || "Licența nu a putut fi actualizată.")}</div>`
+                      : ""
                 }
               </div>
             `
@@ -521,9 +910,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
         const url = button.getAttribute("data-url");
-        if (url) {
-          window.open(url, "_blank", "noopener");
-        }
+        if (url) window.open(url, "_blank", "noopener");
       });
     });
 
@@ -546,9 +933,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
         if (event.key === "Enter") {
           event.preventDefault();
           const applyBtn = root.querySelector(".apply-license-btn");
-          if (applyBtn) {
-            applyBtn.click();
-          }
+          if (applyBtn) applyBtn.click();
         }
       });
     }
@@ -557,13 +942,11 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
     if (applyLicenseBtn) {
       applyLicenseBtn.addEventListener("click", async (event) => {
         event.stopPropagation();
-
         const value = String(this._licenseInputValue || "").trim();
-        if (!value || !this._licenseInputEntityId || !this._licenseApplyEntityId) {
-          return;
-        }
+        if (!value || !this._licenseInputEntityId || !this._licenseApplyEntityId) return;
 
-        applyLicenseBtn.disabled = true;
+        this._setActionState("license", this._licenseApplyEntityId, { status: "sending", message: "" });
+        this._render();
 
         try {
           await this._hass.callService("text", "set_value", {
@@ -574,17 +957,106 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
           await this._hass.callService("button", "press", {
             entity_id: this._licenseApplyEntityId,
           });
-        } finally {
-          applyLicenseBtn.disabled = false;
+
+          await this._sleep(1800);
+          await this._refreshEntities([
+            this._licenseInputEntityId,
+            this._licenseApplyEntityId,
+            "sensor.utilitati_romania_status_licenta",
+            "sensor.utilitati_romania_plan_licenta",
+            "sensor.utilitati_romania_valabila_pana_la",
+            "sensor.utilitati_romania_ultima_verificare_licenta",
+            "sensor.utilitati_romania_cont_licenta",
+            "sensor.utilitati_romania_mesaj_licenta",
+          ]);
+
+          this._setActionState("license", this._licenseApplyEntityId, {
+            status: "success",
+            message: "Licența a fost actualizată. Datele se reîncarcă automat.",
+          });
+        } catch (err) {
+          this._setActionState("license", this._licenseApplyEntityId, {
+            status: "error",
+            message: err?.message || "Aplicarea licenței a eșuat.",
+          });
         }
+
+        this._render();
       });
     }
+
+    root.querySelectorAll(".reading-input").forEach((input) => {
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const wrapper = event.target.closest(".reading-control");
+          const button = wrapper?.querySelector(".reading-submit-btn");
+          if (button) button.click();
+        }
+      });
+    });
+
+    root.querySelectorAll(".reading-submit-btn").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const wrapper = event.target.closest(".reading-control");
+        const numberEntityId = wrapper?.getAttribute("data-number-entity");
+        const buttonEntityId = wrapper?.getAttribute("data-button-entity");
+        const input = wrapper?.querySelector(".reading-input");
+        const value = String(input?.value ?? "").trim();
+
+        if (!numberEntityId || !buttonEntityId || !value) {
+          if (buttonEntityId) {
+            this._setActionState("reading", buttonEntityId, {
+              status: "error",
+              message: "Introdu mai întâi o valoare validă pentru index.",
+            });
+            this._render();
+          }
+          return;
+        }
+
+        this._setActionState("reading", buttonEntityId, { status: "sending", message: "" });
+        this._render();
+
+        try {
+          await this._hass.callService("number", "set_value", {
+            entity_id: numberEntityId,
+            value: Number(value),
+          });
+
+          await this._hass.callService("button", "press", {
+            entity_id: buttonEntityId,
+          });
+
+          await this._sleep(2000);
+          await this._refreshEntities([
+            numberEntityId,
+            buttonEntityId,
+            this._findEntityId(),
+          ]);
+
+          this._readingCache.clear();
+          this._setActionState("reading", buttonEntityId, {
+            status: "success",
+            message: "Indexul a fost trimis. Cardul se actualizează automat.",
+          });
+        } catch (err) {
+          this._setActionState("reading", buttonEntityId, {
+            status: "error",
+            message: err?.message || "Transmiterea indexului a eșuat.",
+          });
+        }
+
+        this._render();
+      });
+    });
   }
 
   _render() {
-    if (!this._hass) {
-      return;
-    }
+    if (!this._hass) return;
+
+    this._readingCache.clear();
 
     if (!this.content) {
       const card = document.createElement("ha-card");
@@ -618,7 +1090,10 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
           this._config.show_header
             ? `
               <div class="header">
-                <div class="title">${this._escapeHtml(this._config.title || entity.attributes.friendly_name || "Facturi utilități")}</div>
+                <div class="header-left">
+                  <img class="ur-logo" src="/utilitati_romania/logo.png" />
+                  <div class="title">${this._escapeHtml(this._config.title || entity.attributes.friendly_name || "Facturi utilități")}</div>
+                </div>
                 <div class="count">${locations.length} ${locations.length === 1 ? "adresă" : "adrese"}</div>
               </div>
             `
@@ -633,19 +1108,27 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
           ${
             locations.length
               ? locations
-                  .map(
-                    (location) => `
-                <div class="location">
-                  <div class="location-title">${this._escapeHtml(location.eticheta_locatie || location.locatie_cheie || "Locație")}</div>
-                  <div class="location-meta">${this._escapeHtml(this._locationSummary(location))}</div>
-                  <div class="invoice-list">
-                    ${(location.furnizori || [])
-                      .map((provider, index) => this._buildProviderRow(location, provider, index))
-                      .join("")}
-                  </div>
-                </div>
-              `
-                  )
+                  .map((location) => {
+                    const openReading = this._getAnyOpenReadingForLocation(location);
+
+                    const hasUnpaid = (location.furnizori || []).some((p) => {
+                      const status = this._normalizeStatus(p.status || p.payment_status || p.status_raw);
+                      return status === "unpaid";
+                    });
+
+                    return `
+                      <div class="location ${hasUnpaid ? 'location-unpaid' : ''}">
+                        <div class="location-heading">
+                          <div class="location-title">${this._escapeHtml(location.eticheta_locatie || location.locatie_cheie || "Locație")}</div>
+                          ${openReading?.badge ? this._buildReadingBadge(openReading.badge) : ""}
+                        </div>
+                        <div class="location-meta">${this._escapeHtml(this._locationSummary(location))}</div>
+                        <div class="invoice-list">
+                          ${(location.furnizori || []).map((provider, index) => this._buildProviderRow(location, provider, index)).join("")}
+                        </div>
+                      </div>
+                    `;
+                  })
                   .join("")
               : `<div class="empty">Nu există facturi de afișat pentru filtrele selectate.</div>`
           }
@@ -660,6 +1143,11 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
 
   _styles() {
     return `
+      ha-card {
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+        border-radius: 14px;
+      }
+
       .wrapper {
         padding: 16px;
       }
@@ -670,11 +1158,27 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
         align-items: center;
         gap: 12px;
         margin-bottom: 14px;
+        padding: 12px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.03);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+      }
+
+      .header-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .ur-logo {
+        width: 34px;
+        height: 34px;
+        object-fit: contain;
       }
 
       .title {
-        font-size: 1.1rem;
-        font-weight: 600;
+        font-size: 1.15rem;
+        font-weight: 700;
       }
 
       .count {
@@ -684,9 +1188,11 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
 
       .license-wrap {
         margin-bottom: 18px;
-        border-radius: 10px;
+        border-radius: 12px;
         background: var(--secondary-background-color);
         overflow: hidden;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+        border: 1px solid rgba(255, 255, 255, 0.05);
       }
 
       .license-header {
@@ -728,7 +1234,8 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
         margin-top: 10px;
       }
 
-      .license-input {
+      .license-input,
+      .reading-input {
         width: 100%;
         min-width: 0;
         padding: 10px 12px;
@@ -741,11 +1248,15 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
         box-sizing: border-box;
       }
 
-      .license-input:focus {
+      .license-input:focus,
+      .reading-input:focus {
         border-color: var(--primary-color);
       }
 
-      .license-btn {
+      .license-btn,
+      .reading-submit-btn,
+      .details-btn,
+      .pdf-btn {
         padding: 8px 12px;
         border-radius: 10px;
         border: 1px solid var(--divider-color);
@@ -755,13 +1266,29 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
         font: inherit;
       }
 
-      .license-btn:hover {
+      .license-btn:hover,
+      .reading-submit-btn:hover,
+      .details-btn:hover,
+      .pdf-btn:hover {
         background: rgba(255, 255, 255, 0.04);
       }
 
-      .license-btn:disabled {
+      .license-btn:disabled,
+      .reading-submit-btn:disabled {
         opacity: 0.6;
         cursor: default;
+      }
+
+      .badge-unpaid {
+        display: inline-flex;
+        align-items: center;
+        padding: 3px 8px;
+        border-radius: 999px;
+        background: rgba(244, 67, 54, 0.15);
+        color: var(--error-color);
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.02em;
       }
 
       .summary {
@@ -791,22 +1318,50 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
         padding-bottom: 14px;
         border-bottom: 1px solid var(--divider-color);
       }
+    
+      .location-unpaid {
+        border-left: 4px solid var(--error-color);
+        padding-left: 10px;
+      }
+
+      .location-unpaid .location-title {
+        color: var(--error-color);
+      }
 
       .location:last-child {
         border-bottom: none;
         padding-bottom: 0;
       }
 
+      .location-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        margin-bottom: 4px;
+      }
+
       .location-title {
         font-size: 1rem;
         font-weight: 700;
-        margin-bottom: 4px;
       }
 
       .location-meta {
         font-size: 0.85rem;
         color: var(--secondary-text-color);
         margin-bottom: 12px;
+      }
+
+      .reading-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 8px;
+        border-radius: 999px;
+        background: rgba(33, 150, 243, 0.14);
+        color: var(--primary-color);
+        font-size: 0.75rem;
+        font-weight: 600;
+        white-space: nowrap;
       }
 
       .invoice-list {
@@ -816,9 +1371,21 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       }
 
       .invoice-row-wrap {
-        border-radius: 10px;
+        border-radius: 12px;
         background: var(--secondary-background-color);
         overflow: hidden;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      .invoice-unpaid .row-amount {
+        color: var(--error-color);
+        font-weight: 700;
+      }      
+
+      .invoice-row-wrap:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
       }
 
       .invoice-row {
@@ -836,6 +1403,10 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       .row-supplier {
         font-weight: 700;
         margin-bottom: 2px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
       }
 
       .row-title {
@@ -852,18 +1423,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       }
 
       .details-btn {
-        padding: 6px 10px;
-        border-radius: 8px;
-        border: 1px solid var(--divider-color);
-        background: transparent;
-        color: var(--primary-text-color);
-        cursor: pointer;
-        font: inherit;
         white-space: nowrap;
-      }
-
-      .details-btn:hover {
-        background: rgba(255, 255, 255, 0.04);
       }
 
       .invoice-details {
@@ -887,25 +1447,67 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
         margin-top: 4px;
       }
 
-      .pdf-btn {
-        padding: 8px 10px;
+      .reading-wrap {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px dashed rgba(255, 255, 255, 0.12);
+      }
+
+      .reading-title {
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+
+      .reading-period {
+        font-size: 0.84rem;
+        color: var(--secondary-text-color);
+        margin-bottom: 10px;
+      }
+
+      .reading-control {
+        padding: 10px;
         border-radius: 10px;
-        border: 1px solid var(--divider-color);
-        background: transparent;
-        color: var(--primary-text-color);
-        cursor: pointer;
-        font: inherit;
+        background: rgba(255, 255, 255, 0.03);
+        margin-top: 8px;
       }
 
-      .pdf-btn:hover {
-        background: rgba(255, 255, 255, 0.04);
+      .reading-control-header {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: center;
+        margin-bottom: 8px;
       }
 
-      .status-paid {
+      .reading-control-title {
+        font-weight: 600;
+      }
+
+      .reading-control-current {
+        color: var(--secondary-text-color);
+        font-size: 0.84rem;
+        text-align: right;
+      }
+
+      .reading-control-editor {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+      }
+
+      .inline-status {
+        margin-top: 8px;
+        font-size: 0.84rem;
+        font-weight: 500;
+      }
+
+      .status-paid,
+      .status-success {
         color: var(--success-color, #2e7d32);
       }
 
-      .status-unpaid {
+      .status-unpaid,
+      .status-error {
         color: var(--error-color);
       }
 
@@ -943,13 +1545,20 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
           font-size: 0.9rem;
         }
 
-        .license-header {
+        .license-header,
+        .reading-control-header,
+        .location-heading {
           align-items: flex-start;
           flex-direction: column;
         }
 
-        .license-inline-editor {
+        .license-inline-editor,
+        .reading-control-editor {
           grid-template-columns: 1fr;
+        }
+
+        .reading-control-current {
+          text-align: left;
         }
       }
     `;
@@ -977,6 +1586,6 @@ if (!window.customCards.some((card) => card.type === "utilitati-romania-facturi-
   window.customCards.push({
     type: "utilitati-romania-facturi-card",
     name: "Utilități România Facturi Card",
-    description: "Card compact cu detalii expandabile pentru facturi agregate și informații de licență.",
+    description: "Card compact cu detalii expandabile pentru facturi agregate, licență și transmitere index.",
   });
 }

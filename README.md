@@ -1,122 +1,69 @@
-# Utilități România – Home Assistant Integration
+# 🇷🇴 Utilități România – Home Assistant Integration
 
-Integrarea **Utilități România** aduce într-un singur loc toate informațiile importante despre utilitățile tale: consum, facturi, plăți și interacțiuni directe cu furnizorii – direct în Home Assistant.
+Integrare unificată pentru gestionarea utilităților din România direct în Home Assistant.
 
-Scopul integrării este simplu: să elimine nevoia de a intra în mai multe aplicații și să permită controlul complet dintr-un singur loc.
-
----
-
-## 📸 Preview
-
-### Overview
-
-### Administrare integrare
-
-### Exemplu furnizor
-
-### eBloc (exemplu avansat)
+Centralizează facturi, notificări și transmiterea indexului într-un singur loc, indiferent de furnizor.
 
 ---
 
-## 🔥 Funcționalități principale
+## ✨ Funcționalități principale
 
-- Integrare unificată pentru mai mulți furnizori
-- Suport pentru mai multe locații și contracte
-- Senzori detaliați pentru:
-  - consum
-  - facturi
-  - plăți
-  - scadențe
-  - solduri
-- Trimitere index direct din Home Assistant
-- Gestionare număr persoane (unde este permis)
-- Sistem de licențiere integrat
-- Notificări automate
-- Card custom pentru dashboard
-- Diagnostics complet pentru debugging
+- 📄 Facturi centralizate pentru mai mulți furnizori
+- 🏠 Suport multi-locație (mai multe adrese / POD-uri / contracte)
+- 🔔 Notificări automate:
+  - facturi noi emise
+  - deschiderea perioadei de citire a indexului
+- ✍️ Transmitere index direct din dashboard
+- 🧠 Detectare automată perioadă de citire
+- 🔑 Sistem de licențiere integrat (trial + lifetime)
+- 🧩 Integrare nativă Home Assistant
 
 ---
 
-## 🧠 Modul Administrare
+## 🖼️ Interfață
 
-Integrarea include un modul central de administrare, disponibil automat după instalare.
+### Card facturi utilități
 
-Acesta oferă:
-
-- status complet al licenței
-- informații despre contul asociat
-- perioadă de valabilitate
-- acțiuni globale (ex: reload integrare)
-- informații utile pentru suport și diagnostic
+![Facturi utilități](./docs/card.png)
 
 ---
 
-## 💳 Card custom (Lovelace)
+### Integrarea în Home Assistant
 
-Integrarea include un **card custom dedicat**, care afișează centralizat toate informațiile importante.
-
-### Include:
-
-- facturi (cu evidențiere pentru cele neplătite)
-- notificări pentru:
-  - factură nouă emisă
-  - deschidere perioadă citire contor
-- status general al furnizorilor
-- secțiune dedicată licenței:
-  - plan activ
-  - dată expirare
-  - utilizator asociat
-  - actualizare cheie licență direct din UI
+![Integrare](./docs/integrare.png)
 
 ---
 
-## 🔔 Notificări
+### Device & Control
 
-Integrarea generează automat notificări pentru:
-
-- emiterea unei facturi noi
-- deschiderea perioadei de transmitere index
-
-Notificările sunt gândite să fie utile în viața reală, nu doar informative.
+![Device](./docs/integrare2.png)
 
 ---
 
-## 🏢 Furnizori suportați
+## ⚡ Furnizori suportați (în prezent)
 
+- E.ON
 - Hidroelectrica
-- E.ON România
 - myElectrica
+- Digi
+- Nova
 - Apă Canal Sibiu
 - eBloc
-- Digi România
-- Nova Power & Gas
 
-> ⚠️ Funcționalitățile pot varia în funcție de furnizor.
+👉 Lista este în continuă extindere. Vor fi adăugați și alți furnizori.
 
 ---
 
-## 📦 Instalare
+## 🚀 Instalare
 
-### HACS (recomandat)
+### Prin HACS
 
 1. Deschide HACS
 2. Mergi la Integrations
-3. Meniu (⋮) → Custom repositories
-4. Adaugă:
+3. Adaugă repository custom:
    https://github.com/mariusonitiu/utilitati_romania
-5. Tip: Integration
-6. Instalează
-7. Restart Home Assistant
-
----
-
-### Instalare manuală
-
-Copiază folderul:
-
-`custom_components/utilitati_romania`
-
-și restart Home Assistant.
+4. Instalează integrarea
+5. Restart Home Assistant
 
 ---
 
@@ -124,75 +71,37 @@ Copiază folderul:
 
 1. Settings → Devices & Services
 2. Add Integration
-3. Caută „Utilități România”
-4. Selectează furnizorul
-5. Introdu datele de autentificare
-6. Introdu cheia de licență
+3. Caută Utilități România
 
 ---
 
-## 🔐 Licență
+## 📊 Card custom
 
-Integrarea include sistem de licențiere:
-
-- perioadă trial (complet funcțională)
-- licență lifetime
-
-După expirare:
-
-- integrarea rămâne vizibilă
-- dar nu mai actualizează datele și nu mai execută acțiuni
-
-Licența poate fi gestionată direct din cardul din dashboard.
+type: custom:utilitati-romania-facturi-card
 
 ---
 
-## 🔁 Reload global
+## 🔑 Licență
 
-Poți reîncărca toate sub-integrările:
-
-Din UI sau prin serviciu:
-
-`utilitati_romania.reload_all`
+- Trial inclus
+- Upgrade la lifetime
 
 ---
 
-## 🛠 Troubleshooting
+## ☕ Susține proiectul
 
-**Nu apar entități**
-
-- restart complet Home Assistant
-- verifică logs
-
-**Entități unavailable**
-
-- verifică autentificarea
-- verifică licența
+https://buymeacoffee.com/mariusonitiu
 
 ---
 
-## 🧾 Diagnostics
+## 📌 Roadmap
 
-Integrarea oferă export complet pentru debugging (fără date sensibile).
-
----
-
-## 👨‍💻 Autor
-
-Marius Onițiu
-https://github.com/mariusonitiu
+- noi furnizori
+- îmbunătățiri UI
+- optimizări
 
 ---
 
-## ❤️ Suport
+## ⚠️ Disclaimer
 
-Dacă integrarea îți este utilă:
-
-⭐ lasă un star pe GitHub
-☕ Buy me a coffee
-
----
-
-## ⚖️ Disclaimer
-
-Integrarea nu este afiliată oficial cu furnizorii și utilizează API-uri publice sau reverse engineered.
+Integrare neoficială.
