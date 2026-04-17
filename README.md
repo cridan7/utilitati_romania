@@ -79,6 +79,19 @@ Centralizează facturi, notificări și transmiterea indexului într-un singur l
 
 type: custom:utilitati-romania-facturi-card
 
+🧩 Grupare facturi între furnizori
+
+Integrarea permite acum gruparea manuală a facturilor provenite de la furnizori diferiți, astfel încât mai multe servicii (energie, gaz, internet etc.) aferente aceleiași locații să fie afișate împreună.
+
+Cum funcționează:
+Fiecare adresă / loc de consum poate avea o etichetă de grupare definită manual
+Facturile cu aceeași etichetă sunt afișate împreună în card
+Dacă nu este definită o etichetă, se folosește automat gruparea implicită
+Configurare:
+Accesează device-ul „Grupare facturi”
+Completează câmpurile „Grupare facturi …” pentru fiecare locație
+Folosește aceeași etichetă pentru locațiile care trebuie grupate
+
 ---
 
 ## 🔑 Licență
