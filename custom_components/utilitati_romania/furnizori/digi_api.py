@@ -127,7 +127,16 @@ class AddressOption:
 
 class DigiApiClient:
     def __init__(self, session: aiohttp.ClientSession) -> None:
-        self._session = session
+        connector = session.connector
+        if connector is None:
+            raise DigiError("HTTP session connector is unavailable")
+
+        self._session = aiohttp.ClientSession(
+            connector=connector,
+            connector_owner=False,
+            cookie_jar=aiohttp.CookieJar(),
+            timeout=session.timeout,
+        )
         self._default_headers = {
             "User-Agent": USER_AGENT,
             "Accept-Language": "ro-RO,ro;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -136,7 +145,8 @@ class DigiApiClient:
         }
 
     async def close(self) -> None:
-        return None
+        if not self._session.closed:
+            await self._session.close()
 
     async def _request(self, method: str, url: str, **kwargs: Any) -> aiohttp.ClientResponse:
         headers = dict(self._default_headers)
@@ -163,15 +173,29 @@ class DigiApiClient:
         return cookies
 
     def import_cookies(self, cookies: list[dict[str, Any]]) -> None:
-        if not cookies:
-            return
         jar = self._session.cookie_jar
         jar.clear()
+
+        if not cookies:
+            return
+
         for item in cookies:
-            morsel = {item["key"]: item["value"]}
-            jar.update_cookies(morsel, response_url=URL(f"https://{item['domain'].lstrip('.')}"))
+            domain = str(item.get("domain", "")).strip()
+            key = str(item.get("key", "")).strip()
+            value = str(item.get("value", ""))
+
+            if not domain or not key:
+                continue
+
+            morsel = {key: value}
+            jar.update_cookies(
+                morsel,
+                response_url=URL(f"https://{domain.lstrip('.')}"),
+            )
 
     async def begin_login(self, email: str, password: str) -> tuple[str, str]:
+        self._session.cookie_jar.clear()
+
         payload = {
             "signin-input-app": "0",
             "signin-input-email": email,
