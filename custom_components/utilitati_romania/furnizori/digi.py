@@ -82,6 +82,9 @@ class ClientFurnizorDigi(ClientFurnizor):
         super().__init__(sesiune=sesiune, utilizator=utilizator, parola=parola, optiuni=optiuni)
         self.api = DigiApiClient(sesiune)
 
+    async def async_inchide(self) -> None:
+        await self.api.close()
+
     def importa_cookies(self, cookies: list[dict[str, Any]] | None) -> None:
         self.api.import_cookies(cookies or [])
 
