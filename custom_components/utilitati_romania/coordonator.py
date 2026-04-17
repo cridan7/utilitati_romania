@@ -70,6 +70,11 @@ class CoordonatorUtilitatiRomania(DataUpdateCoordinator[InstantaneuFurnizor]):
             config_entry=intrare,
         )
 
+    async def async_inchide(self) -> None:
+        inchidere = getattr(self.client, "async_inchide", None)
+        if callable(inchidere):
+            await inchidere()
+
     async def _async_update_data(self) -> InstantaneuFurnizor:
         if not self._notificari_incarcate:
             try:
@@ -284,7 +289,6 @@ class CoordonatorUtilitatiRomania(DataUpdateCoordinator[InstantaneuFurnizor]):
         raw = getattr(factura, "date_brute", None) or {}
 
         if isinstance(raw, list):
-            # E.ON poate pune aici invoices_unpaid_raw pentru facturile neplătite
             if raw:
                 return False
             raw = {}
@@ -292,7 +296,6 @@ class CoordonatorUtilitatiRomania(DataUpdateCoordinator[InstantaneuFurnizor]):
         if not isinstance(raw, dict):
             raw = {}
 
-        # 1. Stări explicite
         if stare in {
             "platita",
             "plătită",
@@ -317,7 +320,6 @@ class CoordonatorUtilitatiRomania(DataUpdateCoordinator[InstantaneuFurnizor]):
         }:
             return False
 
-        # 2. Rest de plată explicit în payload
         restante_candidates = [
             raw.get("rest_plata"),
             raw.get("amount_remaining"),
@@ -340,7 +342,6 @@ class CoordonatorUtilitatiRomania(DataUpdateCoordinator[InstantaneuFurnizor]):
             if numar == 0:
                 return True
 
-        # 3. Status textual brut
         status_text = str(
             raw.get("invoice_status")
             or raw.get("InvoiceStatus")
@@ -370,8 +371,6 @@ class CoordonatorUtilitatiRomania(DataUpdateCoordinator[InstantaneuFurnizor]):
         }:
             return False
 
-        # 4. Fallback sigur:
-        # dacă nu știm clar, tratăm factura ca plătită pentru a evita notificări false
         return True
 
     def _construieste_id_factura(self, factura: Any, instantaneu: InstantaneuFurnizor) -> str | None:
