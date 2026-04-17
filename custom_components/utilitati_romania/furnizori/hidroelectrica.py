@@ -172,6 +172,59 @@ def _index_din_previous(previous_payload: dict[str, Any] | None) -> float | None
     return None
 
 
+def _construieste_factura_curenta_din_bill(
+    bill: dict[str, Any] | None,
+    *,
+    id_cont: str,
+    id_contract: str,
+) -> FacturaUtilitate | None:
+    if not isinstance(bill, dict) or not bill:
+        return None
+
+    numar_factura = _extrage_numar_factura_lizibil(bill)
+    suma = _float_ro(bill.get('billamount') or bill.get('amount'))
+    rest_plata = _float_ro(
+        bill.get('rembalance')
+        or bill.get('remainingAmount')
+        or bill.get('amount_remaining')
+    )
+    data_emitere = _parseaza_data(
+        bill.get('billdate')
+        or bill.get('billDate')
+        or bill.get('invoiceDate')
+        or bill.get('date')
+    )
+    data_scadenta = _parseaza_data(
+        bill.get('duedate')
+        or bill.get('dueDate')
+        or bill.get('scadenta')
+    )
+
+    if not numar_factura and suma is None and data_emitere is None and data_scadenta is None:
+        return None
+
+    este_prosumator = _detecteaza_prosumator_din_factura(bill)
+    categorie = 'injectie' if este_prosumator and (suma is None or suma <= 0) else 'consum'
+    stare = 'neplatita' if (rest_plata or 0) > 0 else None
+
+    return FacturaUtilitate(
+        id_factura=str(numar_factura or ''),
+        titlu=str(bill.get('invoiceType') or bill.get('type') or 'Factură'),
+        valoare=suma,
+        moneda='RON',
+        data_emitere=data_emitere,
+        data_scadenta=data_scadenta,
+        stare=stare,
+        categorie=categorie,
+        id_cont=id_cont,
+        id_contract=id_contract,
+        tip_utilitate='curent',
+        tip_serviciu='curent',
+        este_prosumator=este_prosumator,
+        date_brute={**bill, 'rest_plata': rest_plata, '_synthetic_current_bill': True},
+    )
+
+
 class ClientFurnizorHidroelectrica(ClientFurnizor):
     cheie_furnizor = 'hidroelectrica'
     nume_prietenos = 'Hidroelectrica'
@@ -271,6 +324,7 @@ class ClientFurnizorHidroelectrica(ClientFurnizor):
             ))
 
             facturi_cont: list[FacturaUtilitate] = []
+            facturi_cont_ids: set[str] = set()
             for intrare in lista_facturi:
                 suma = _float_ro(intrare.get('amount'))
                 pros = _detecteaza_prosumator_din_factura(intrare)
@@ -293,6 +347,21 @@ class ClientFurnizorHidroelectrica(ClientFurnizor):
                     date_brute={**intrare, 'rest_plata': rest_plata},
                 )
                 facturi_cont.append(factura)
+                if factura.id_factura:
+                    facturi_cont_ids.add(factura.id_factura)
+
+            factura_curenta = _construieste_factura_curenta_din_bill(
+                bill,
+                id_cont=id_cont_unic,
+                id_contract=uan,
+            )
+            if factura_curenta is not None:
+                exista_prosumator = exista_prosumator or factura_curenta.este_prosumator
+                if not factura_curenta.id_factura or factura_curenta.id_factura not in facturi_cont_ids:
+                    facturi_cont.append(factura_curenta)
+                    if factura_curenta.id_factura:
+                        facturi_cont_ids.add(factura_curenta.id_factura)
+
             facturi.extend(facturi_cont)
 
             rembalance = _float_ro(bill.get('rembalance'))
