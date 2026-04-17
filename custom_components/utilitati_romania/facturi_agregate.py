@@ -5,6 +5,7 @@ from typing import Any
 
 from .const import DOMENIU, FURNIZOR_ADMIN_GLOBAL
 from .coordonator import CoordonatorUtilitatiRomania
+from .grupare_facturi import obtine_grupare_factura
 from .helpers_facturi_locatie import (
     build_facturi_location_label,
     normalize_facturi_location_key,
@@ -15,7 +16,6 @@ from .naming import normalize_text
 
 _PROVIDER_LABELS = {
     "apa_canal": "Apă Canal Sibiu",
-    "apacanal2000": "Apă Canal 2000 Pitești",
     "deer": "DEER",
     "digi": "Digi",
     "ebloc": "eBloc",
@@ -227,16 +227,49 @@ def _derive_payment_status(
     return "unknown", None, None
 
 
+
+
+def _location_fields(
+    coordonator: CoordonatorUtilitatiRomania,
+    instantaneu: InstantaneuFurnizor,
+    cont: ContUtilitate | None,
+    fallback_value: Any,
+) -> tuple[str, str, str | None]:
+    id_cont = getattr(cont, "id_cont", None) if cont else None
+    manual_group_label = None
+    if id_cont:
+        manual_group_label = obtine_grupare_factura(
+            coordonator.hass,
+            coordonator.intrare.entry_id,
+            instantaneu.furnizor,
+            id_cont,
+        )
+
+    if manual_group_label:
+        return (
+            normalize_facturi_location_key(manual_group_label),
+            manual_group_label,
+            manual_group_label,
+        )
+
+    return (
+        normalize_facturi_location_key(fallback_value),
+        build_facturi_location_label(fallback_value),
+        None,
+    )
+
 def _build_invoice_item(
     coordonator: CoordonatorUtilitatiRomania,
     instantaneu: InstantaneuFurnizor,
     factura: FacturaUtilitate,
 ) -> dict[str, Any]:
     cont = _cont_for_factura(instantaneu, factura)
-    location_key = normalize_facturi_location_key(
-        cont or getattr(factura, "id_cont", None) or instantaneu.titlu
+    location_key, location_label, manual_group_label = _location_fields(
+        coordonator,
+        instantaneu,
+        cont,
+        cont or getattr(factura, "id_cont", None) or instantaneu.titlu,
     )
-    location_label = build_facturi_location_label(cont or instantaneu.titlu)
     payment_status, is_paid, unpaid_amount = _derive_payment_status(
         instantaneu,
         factura,
@@ -267,6 +300,7 @@ def _build_invoice_item(
         "locatie_cheie": location_key,
         "eticheta_locatie": location_label,
         "adresa_originala": getattr(cont, "adresa", None) if cont else None,
+        "eticheta_grupare_manuala": manual_group_label,
         "id_cont": getattr(factura, "id_cont", None) or (getattr(cont, "id_cont", None) if cont else None),
         "id_contract": getattr(factura, "id_contract", None) or (getattr(cont, "id_contract", None) if cont else None),
         "nume_cont": getattr(cont, "nume", None) if cont else None,
@@ -405,15 +439,22 @@ def _build_eon_fallback_item(
 
     issue_date = _format_date(data_emitere)
     due_date = _format_date(data_scadenta)
+    location_key, location_label, manual_group_label = _location_fields(
+        coordonator,
+        instantaneu,
+        cont,
+        cont,
+    )
 
     return {
         "entry_id": coordonator.intrare.entry_id,
         "entry_title": coordonator.intrare.title,
         "furnizor": instantaneu.furnizor,
         "furnizor_label": _provider_label(instantaneu.furnizor),
-        "locatie_cheie": normalize_facturi_location_key(cont),
-        "eticheta_locatie": build_facturi_location_label(cont),
+        "locatie_cheie": location_key,
+        "eticheta_locatie": location_label,
         "adresa_originala": getattr(cont, "adresa", None),
+        "eticheta_grupare_manuala": manual_group_label,
         "id_cont": id_cont,
         "id_contract": getattr(cont, "id_contract", None),
         "nume_cont": getattr(cont, "nume", None),
@@ -514,14 +555,22 @@ def _build_ebloc_fallback_item(
     if amount is None and due_date is None and issue_date is None:
         return None
 
+    location_key, location_label, manual_group_label = _location_fields(
+        coordonator,
+        instantaneu,
+        cont,
+        cont,
+    )
+
     return {
         'entry_id': coordonator.intrare.entry_id,
         'entry_title': coordonator.intrare.title,
         'furnizor': instantaneu.furnizor,
         'furnizor_label': _provider_label(instantaneu.furnizor),
-        'locatie_cheie': normalize_facturi_location_key(cont),
-        'eticheta_locatie': build_facturi_location_label(cont),
+        'locatie_cheie': location_key,
+        'eticheta_locatie': location_label,
         'adresa_originala': getattr(cont, 'adresa', None),
+        'eticheta_grupare_manuala': manual_group_label,
         'id_cont': id_cont,
         'id_contract': getattr(cont, 'id_contract', None),
         'nume_cont': getattr(cont, 'nume', None),
