@@ -7,8 +7,9 @@ from pathlib import Path
 from homeassistant.components import persistent_notification
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from .const import (
@@ -20,6 +21,7 @@ from .const import (
     SERVICIU_RELOAD_ALL,
 )
 from .coordonator import CoordonatorUtilitatiRomania
+from .grupare_facturi import async_incarca_grupari_facturi
 from .deer_device import alias_loc_deer, slug_loc_deer
 from .eon_device import alias_loc_eon, slug_loc_eon
 from .hidro_device import alias_loc_consum, slug_loc_consum
@@ -224,9 +226,151 @@ def _async_remove_services_if_unused(hass: HomeAssistant) -> None:
     hass.data[DOMENIU]["_services_registered"] = False
 
 
+async def _async_cleanup_admin_registry_links(hass: HomeAssistant) -> None:
+    """Curăță legăturile vechi de registry după mutarea grupărilor de facturi.
+
+    Obiective:
+    - păstrăm un singur device principal „Administrare integrare”
+    - păstrăm un singur device „Grupare facturi”
+    - scoatem aceste device-uri din secțiunile furnizorilor dacă au rămas legate acolo
+    - ștergem entitățile vechi de grupare rămase pe device-ul principal de administrare
+    """
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+
+    admin_entry_ids = {
+        existing_entry.entry_id
+        for existing_entry in hass.config_entries.async_entries(DOMENIU)
+        if existing_entry.data.get(CONF_FURNIZOR) == FURNIZOR_ADMIN_GLOBAL
+    }
+    if not admin_entry_ids:
+        return
+
+    admin_device_ids: set[str] = set()
+    grouping_device_ids: set[str] = set()
+
+    for device in list(device_registry.devices.values()):
+        identifiers = set(device.identifiers or set())
+
+        if any(domain == DOMENIU and identifier in admin_entry_ids for domain, identifier in identifiers):
+            admin_device_ids.add(device.id)
+
+        if (DOMENIU, "grupare_facturi") in identifiers:
+            grouping_device_ids.add(device.id)
+
+    # 1) Ștergem de pe device-ul principal de administrare entitățile vechi de grupare
+    # rămase din versiunile anterioare. Cele valide trebuie să stea acum în „Grupare facturi”.
+    for device_id in admin_device_ids:
+        for entity_entry in list(
+            er.async_entries_for_device(
+                entity_registry,
+                device_id,
+                include_disabled_entities=True,
+            )
+        ):
+            if (
+                entity_entry.platform == DOMENIU
+                and entity_entry.domain == "text"
+                and "_grupare_facturi" in str(entity_entry.unique_id)
+            ):
+                try:
+                    entity_registry.async_remove(entity_entry.entity_id)
+                except Exception:
+                    continue
+
+    protected_device_ids = admin_device_ids | grouping_device_ids
+
+    # 2) Scoatem device-urile „Administrare integrare” și „Grupare facturi” din config entries
+    # ale furnizorilor dacă nu mai au entități reale asociate acelor entry-uri.
+    for device_id in protected_device_ids:
+        device = device_registry.async_get(device_id)
+        if device is None:
+            continue
+
+        linked_entry_ids = set(getattr(device, "config_entries", set()) or set())
+        for linked_entry_id in list(linked_entry_ids):
+            if linked_entry_id in admin_entry_ids:
+                continue
+
+            has_entities_for_linked_entry = False
+            for entity_entry in er.async_entries_for_device(
+                entity_registry,
+                device_id,
+                include_disabled_entities=True,
+            ):
+                if entity_entry.config_entry_id == linked_entry_id:
+                    has_entities_for_linked_entry = True
+                    break
+
+            if has_entities_for_linked_entry:
+                continue
+
+            try:
+                device_registry.async_update_device(
+                    device_id,
+                    remove_config_entry_id=linked_entry_id,
+                )
+            except Exception:
+                continue
+
+    # 3) Ștergem eventuale device-uri vechi „Administrare integrare” rămase goale sau
+    # care conțin doar entități vechi de grupare.
+    for device in list(device_registry.devices.values()):
+        if device.id in protected_device_ids:
+            continue
+
+        if device.name != "Administrare integrare":
+            continue
+
+        identifiers = set(device.identifiers or set())
+        if not any(domain == DOMENIU for domain, _ in identifiers):
+            continue
+
+        entities = list(
+            er.async_entries_for_device(
+                entity_registry,
+                device.id,
+                include_disabled_entities=True,
+            )
+        )
+
+        if not entities:
+            try:
+                device_registry.async_remove_device(device.id)
+            except Exception:
+                pass
+            continue
+
+        removable = True
+        for entity_entry in entities:
+            if not (
+                entity_entry.platform == DOMENIU
+                and entity_entry.domain == "text"
+                and "_grupare_facturi" in str(entity_entry.unique_id)
+            ):
+                removable = False
+                break
+
+        if not removable:
+            continue
+
+        for entity_entry in entities:
+            try:
+                entity_registry.async_remove(entity_entry.entity_id)
+            except Exception:
+                continue
+
+        try:
+            device_registry.async_remove_device(device.id)
+        except Exception:
+            continue
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMENIU, {})
     _async_ensure_services(hass)
+    _async_schedule_admin_reload_after_start(hass)
+    await async_incarca_grupari_facturi(hass)
     await _async_register_static_paths(hass)
     await _async_notify_missing_lovelace_resource(hass)
     return True
@@ -235,12 +379,14 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMENIU, {})
     _async_ensure_services(hass)
+    await async_incarca_grupari_facturi(hass)
     await _async_register_static_paths(hass)
     await _async_notify_missing_lovelace_resource(hass)
 
     if entry.data.get(CONF_FURNIZOR) == FURNIZOR_ADMIN_GLOBAL:
         hass.data[DOMENIU][entry.entry_id] = {"admin": True}
         await hass.config_entries.async_forward_entry_setups(entry, _ADMIN_PLATFORME)
+        await _async_cleanup_admin_registry_links(hass)
         return True
 
     await _async_ensure_admin_entry(hass, entry)
@@ -255,6 +401,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _migrare_unique_ids(hass, entry, coordonator)
     hass.data[DOMENIU][entry.entry_id] = coordonator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORME)
+    await _async_cleanup_admin_registry_links(hass)
     return True
 
 
@@ -275,6 +422,20 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMENIU].pop(entry.entry_id, None)
     _async_remove_services_if_unused(hass)
     return descarcat
+
+
+def _async_schedule_admin_reload_after_start(hass: HomeAssistant) -> None:
+    hass.data.setdefault(DOMENIU, {})
+    if hass.data[DOMENIU].get("_admin_reload_after_start_registered"):
+        return
+
+    async def _reload_admin(_event) -> None:
+        admin_entry = _async_get_admin_entry(hass)
+        if admin_entry is not None:
+            await hass.config_entries.async_reload(admin_entry.entry_id)
+
+    hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _reload_admin)
+    hass.data[DOMENIU]["_admin_reload_after_start_registered"] = True
 
 
 def _migrare_senzori_hidro(entry_id: str, data) -> dict[str, tuple[str, str]]:
