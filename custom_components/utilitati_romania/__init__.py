@@ -169,8 +169,6 @@ async def _async_notify_missing_lovelace_resource(hass: HomeAssistant) -> None:
     )
 
 
-
-
 def _async_get_admin_entry(hass: HomeAssistant) -> ConfigEntry | None:
     for existing_entry in hass.config_entries.async_entries(DOMENIU):
         if existing_entry.data.get(CONF_FURNIZOR) == FURNIZOR_ADMIN_GLOBAL:
@@ -248,7 +246,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_ensure_admin_entry(hass, entry)
 
     coordonator = CoordonatorUtilitatiRomania(hass, entry)
-    await coordonator.async_config_entry_first_refresh()
+    try:
+        await coordonator.async_config_entry_first_refresh()
+    except Exception:
+        await coordonator.async_inchide()
+        raise
+
     await _migrare_unique_ids(hass, entry, coordonator)
     hass.data[DOMENIU][entry.entry_id] = coordonator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORME)
@@ -263,8 +266,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _async_remove_services_if_unused(hass)
         return descarcat
 
+    coordonator = hass.data.get(DOMENIU, {}).get(entry.entry_id)
+
     descarcat = await hass.config_entries.async_unload_platforms(entry, PLATFORME)
     if descarcat:
+        if coordonator is not None:
+            await coordonator.async_inchide()
         hass.data[DOMENIU].pop(entry.entry_id, None)
     _async_remove_services_if_unused(hass)
     return descarcat
