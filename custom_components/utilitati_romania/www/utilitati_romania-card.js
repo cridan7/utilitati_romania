@@ -626,6 +626,46 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
     `;
   }
 
+  _getProviderRefreshEntityId(provider) {
+    const explicitEntityId = String(provider?.refresh_button_entity_id || "").trim();
+    if (explicitEntityId) return explicitEntityId;
+    return "";
+  }
+
+_buildProviderRefreshButton(provider) {
+  const refreshEntityId = this._getProviderRefreshEntityId(provider);
+  if (!refreshEntityId || provider?.can_refresh === false) return "";
+
+  const action = this._getActionState("refresh", refreshEntityId);
+  const isSending = action.status === "sending";
+
+  return `
+    <button
+      class="refresh-btn icon-only"
+      data-refresh-entity="${this._escapeAttr(refreshEntityId)}"
+      title="${isSending ? "Se actualizează..." : "Actualizează"}"
+      aria-label="${isSending ? "Se actualizează..." : "Actualizează"}"
+      ${isSending ? "disabled" : ""}
+    >
+      ${isSending ? "⟳" : "↻"}
+    </button>
+  `;
+}
+
+  _buildProviderRefreshStatus(provider) {
+    const refreshEntityId = this._getProviderRefreshEntityId(provider);
+    if (!refreshEntityId) return "";
+
+    const action = this._getActionState("refresh", refreshEntityId);
+    if (action.status === "success") {
+      return `<div class="inline-status status-success">${this._escapeHtml(action.message || "Datele furnizorului au fost actualizate.")}</div>`;
+    }
+    if (action.status === "error") {
+      return `<div class="inline-status status-error">${this._escapeHtml(action.message || "Actualizarea furnizorului a eșuat.")}</div>`;
+    }
+    return "";
+  }
+
   _buildProviderRow(location, provider, index) {
     const supplier = provider.furnizor_label || provider.furnizor || "Furnizor";
     const title = this._providerCompactTitle(provider);
@@ -661,9 +701,12 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
 
           <div class="row-amount">${this._escapeHtml(amountFormatted)}</div>
 
-          <button class="details-btn" data-key="${this._escapeAttr(key)}">
-            ${expanded ? "Ascunde" : "Detalii"}
-          </button>
+          <div class="row-actions">
+            ${this._buildProviderRefreshButton(provider)}
+            <button class="details-btn" data-key="${this._escapeAttr(key)}">
+              ${expanded ? "Ascunde" : "Detalii"}
+            </button>
+          </div>
         </div>
 
         ${
@@ -675,14 +718,42 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
                 <div><span class="detail-label">Data scadenței:</span> <span class="detail-value">${this._escapeHtml(dueDate)}</span></div>
                 <div><span class="detail-label">Serviciu:</span> <span class="detail-value">${this._escapeHtml(tipServiciu)}</span></div>
                 <div><span class="detail-label">Cont:</span> <span class="detail-value">${this._escapeHtml(numeCont)}</span></div>
-                ${provider.pdf_url ? `<div class="detail-actions"><button class="pdf-btn" data-url="${this._escapeAttr(provider.pdf_url)}">Deschide PDF</button></div>` : ""}
+                ${(provider.pdf_url || this._getProviderAppLabel(provider)) ? `
+                  <div class="detail-actions">
+                    ${provider.pdf_url ? `<button class="pdf-btn" data-url="${this._escapeAttr(provider.pdf_url)}">Deschide PDF</button>` : ""}
+                    ${this._buildProviderOpenAppButton(provider)}
+                  </div>
+                ` : ""}
                 ${this._buildReadingControls(location, provider)}
+                ${this._buildProviderRefreshStatus(provider)}
               </div>
             `
             : ""
         }
       </div>
     `;
+  }
+
+
+
+  _getProviderAppLabel(provider) {
+    const key = String(provider?.furnizor || "").trim().toLowerCase();
+    const labels = {
+      digi: "App. Digi",
+      eon: "App. E.ON",
+      ebloc: "App. eBloc",
+      hidroelectrica: "App. Hidroelectrica",
+      nova: "App. Nova",
+    };
+    return labels[key] || "";
+  }
+
+  _buildProviderOpenAppButton(provider) {
+    const providerKey = String(provider?.furnizor || "").trim().toLowerCase();
+    const label = this._getProviderAppLabel(provider);
+    if (!providerKey || !label) return "";
+
+    return `<button class="provider-app-btn" data-provider-open="${this._escapeAttr(providerKey)}">${this._escapeHtml(label)}</button>`;
   }
 
   _findEntityByEntityId(entityId) {
@@ -906,6 +977,22 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       });
     });
 
+    root.querySelectorAll(".provider-app-btn[data-provider-open]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const provider = button.getAttribute("data-provider-open");
+        if (!provider) return;
+
+        try {
+          await this._hass.callService("utilitati_romania", "open_provider", {
+            provider,
+          });
+        } catch (err) {
+          console.error("Nu am putut deschide furnizorul", provider, err);
+        }
+      });
+    });
+
     root.querySelectorAll(".pdf-btn[data-url]").forEach((button) => {
       button.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -913,6 +1000,40 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
         if (url) window.open(url, "_blank", "noopener");
       });
     });
+    root.querySelectorAll(".refresh-btn[data-refresh-entity]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const refreshEntityId = button.getAttribute("data-refresh-entity");
+        const aggregatedEntityId = this._findEntityId();
+        if (!refreshEntityId) return;
+
+        this._setActionState("refresh", refreshEntityId, { status: "sending", message: "" });
+        this._render();
+
+        try {
+          await this._hass.callService("button", "press", {
+            entity_id: refreshEntityId,
+          });
+
+          await this._sleep(1800);
+          await this._refreshEntities([refreshEntityId, aggregatedEntityId]);
+
+          this._readingCache.clear();
+          this._setActionState("refresh", refreshEntityId, {
+            status: "success",
+            message: "Datele furnizorului au fost actualizate.",
+          });
+        } catch (err) {
+          this._setActionState("refresh", refreshEntityId, {
+            status: "error",
+            message: err?.message || "Actualizarea furnizorului a eșuat.",
+          });
+        }
+
+        this._render();
+      });
+    });
+
 
     const licenseToggle = root.querySelector(".license-toggle-btn");
     if (licenseToggle) {
@@ -1256,7 +1377,9 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       .license-btn,
       .reading-submit-btn,
       .details-btn,
-      .pdf-btn {
+      .pdf-btn,
+      .provider-app-btn,
+      .refresh-btn {
         padding: 8px 12px;
         border-radius: 10px;
         border: 1px solid var(--divider-color);
@@ -1269,12 +1392,15 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       .license-btn:hover,
       .reading-submit-btn:hover,
       .details-btn:hover,
-      .pdf-btn:hover {
+      .pdf-btn:hover,
+      .provider-app-btn:hover,
+      .refresh-btn:hover {
         background: rgba(255, 255, 255, 0.04);
       }
 
       .license-btn:disabled,
-      .reading-submit-btn:disabled {
+      .reading-submit-btn:disabled,
+      .refresh-btn:disabled {
         opacity: 0.6;
         cursor: default;
       }
@@ -1388,6 +1514,30 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
         box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
       }
 
+      .row-actions {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+
+      .refresh-btn {
+        white-space: nowrap;
+      }
+
+      .refresh-btn.icon-only {
+        width: 38px;
+        min-width: 38px;
+        height: 38px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.05rem;
+        line-height: 1;
+      }
+
       .invoice-row {
         display: grid;
         grid-template-columns: minmax(0, 1.8fr) auto auto;
@@ -1445,6 +1595,10 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
 
       .detail-actions {
         margin-top: 4px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
       }
 
       .reading-wrap {

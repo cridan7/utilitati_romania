@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 from homeassistant.components import persistent_notification
 from homeassistant.components.http import StaticPathConfig
@@ -19,6 +20,7 @@ from .const import (
     PLATFORME,
     FURNIZOR_ADMIN_GLOBAL,
     SERVICIU_RELOAD_ALL,
+    SERVICIU_OPEN_PROVIDER,
 )
 from .coordonator import CoordonatorUtilitatiRomania
 from .grupare_facturi import async_incarca_grupari_facturi
@@ -32,7 +34,7 @@ from .naming import build_provider_slug, extract_street_slug
 
 _LOVELACE_RESOURCE_URL = "/utilitati_romania/utilitati_romania-card.js"
 _LOVELACE_NOTIFICATION_ID = "utilitati_romania_card_resource"
-_ADMIN_PLATFORME = [Platform.SENSOR, Platform.BUTTON, Platform.TEXT]
+_ADMIN_PLATFORME = [Platform.SENSOR, Platform.BUTTON, Platform.TEXT, Platform.SELECT]
 
 
 def _slug_legacy(text: str | None) -> str:
@@ -206,6 +208,72 @@ async def _async_reload_all_entries(hass: HomeAssistant) -> None:
         await hass.config_entries.async_reload(existing_entry.entry_id)
 
 
+
+def _admin_notify_select_entity_id(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
+    registry = er.async_get(hass)
+    unique_id = f"{entry.entry_id}_admin_dispozitiv_mobil_open_provider"
+    return registry.async_get_entity_id("select", DOMENIU, unique_id)
+
+
+def _provider_open_target(provider: str | None) -> dict[str, str] | None:
+    key = str(provider or "").strip().lower()
+
+    if key == "digi":
+        return {
+            "mode": "launch_app",
+            "package_name": "ro.rcsrds.mydigi",
+            "fallback": "https://www.digi.ro/my-account/invoices",
+        }
+
+    if key == "eon":
+        return {
+            "mode": "launch_app",
+            "package_name": "ro.eon.myline",
+            "fallback": "https://www.eon.ro/myline/login",
+        }
+
+    if key == "myelectrica":
+        return {
+            "mode": "launch_app",
+            "package_name": "ro.tremend.electrica",
+            "fallback": "https://myelectrica.ro/",
+        }
+
+    if key == "hidroelectrica":
+        return {
+            "mode": "launch_app",
+            "package_name": "com.sew.hidroelectrica",
+            "fallback": "https://client.hidroelectrica.ro/",
+        }
+
+    if key == "ebloc":
+        return {
+            "mode": "launch_app",
+            "package_name": "com.xisoft.ebloc.ro",
+            "fallback": "https://www.e-bloc.ro/",
+        }
+
+    if key == "nova":
+        return {
+            "mode": "launch_app",
+            "package_name": "com.nova.mobile",
+            "fallback": "https://nova-energy.ro/",
+        }
+
+    if key == "apa_canal":
+        return {
+            "mode": "url",
+            "fallback": "https://portal.apacansb.ro/sap/bc/ui5_ui5/sap/UMCUI5_MOBILE/",
+        }
+
+    if key == "deer":
+        return {
+            "mode": "url",
+            "fallback": "https://datemasura.distributie-energie.ro/date_ee/do?action=loginForm",
+        }
+
+    return None
+
 def _async_ensure_services(hass: HomeAssistant) -> None:
     if hass.data[DOMENIU].get("_services_registered"):
         return
@@ -213,7 +281,107 @@ def _async_ensure_services(hass: HomeAssistant) -> None:
     async def _async_handle_reload_all(call: ServiceCall) -> None:
         await _async_reload_all_entries(hass)
 
+    async def _async_handle_open_provider(call: ServiceCall) -> None:
+        provider = str(call.data.get("provider") or "").strip().lower()
+        target = _provider_open_target(provider)
+        if not target:
+            persistent_notification.async_create(
+                hass,
+                f"Nu există încă o destinație configurată pentru furnizorul **{provider or '-'}**.",
+                title="Utilități România",
+                notification_id="utilitati_romania_open_provider_missing_target",
+            )
+            return
+
+        admin_entry = _async_get_admin_entry(hass)
+        if admin_entry is None:
+            persistent_notification.async_create(
+                hass,
+                "Nu există intrarea de administrare a integrării.",
+                title="Utilități România",
+                notification_id="utilitati_romania_open_provider_missing_admin",
+            )
+            return
+
+        select_entity_id = _admin_notify_select_entity_id(hass, admin_entry)
+        selected_notify_service = ""
+        if select_entity_id:
+            selected_state = hass.states.get(select_entity_id)
+            selected_notify_service = str(selected_state.state if selected_state else "").strip()
+
+        if not selected_notify_service or selected_notify_service == "none":
+            persistent_notification.async_create(
+                hass,
+                (
+                    "Selectează mai întâi un dispozitiv mobil în secțiunea **Administrare integrare** "
+                    "→ **Dispozitiv mobil pentru deschidere furnizori**."
+                ),
+                title="Utilități România",
+                notification_id="utilitati_romania_open_provider_missing_device",
+            )
+            return
+
+        notify_services = hass.services.async_services().get("notify", {})
+        if selected_notify_service not in notify_services:
+            persistent_notification.async_create(
+                hass,
+                (
+                    f"Serviciul de notificare **notify.{selected_notify_service}** nu mai este disponibil. "
+                    "Alege din nou dispozitivul mobil în Administrare integrare."
+                ),
+                title="Utilități România",
+                notification_id="utilitati_romania_open_provider_invalid_device",
+            )
+            return
+
+        if target.get("mode") == "launch_app" and target.get("package_name"):
+            try:
+                await hass.services.async_call(
+                    "notify",
+                    selected_notify_service,
+                    {
+                        "message": "command_launch_app",
+                        "data": {
+                            "package_name": target["package_name"],
+                        },
+                    },
+                    blocking=True,
+                )
+                return
+            except Exception:
+                _LOGGER.exception("Nu am putut lansa aplicația pentru furnizorul %s", provider)
+
+        fallback = target.get("fallback")
+        if fallback and target.get("mode") == "url":
+            try:
+                await hass.services.async_call(
+                    "notify",
+                    selected_notify_service,
+                    {
+                        "message": "command_activity",
+                        "data": {
+                            "intent_action": "android.intent.action.VIEW",
+                            "intent_uri": fallback,
+                        },
+                    },
+                    blocking=True,
+                )
+                return
+            except Exception:
+                _LOGGER.exception("Nu am putut deschide fallback-ul web pentru furnizorul %s", provider)
+
+        persistent_notification.async_create(
+            hass,
+            (
+                f"Nu am putut deschide furnizorul **{provider}** pe dispozitivul selectat. "
+                "Verifică aplicația Home Assistant Companion și permisiunile de notificare."
+            ),
+            title="Utilități România",
+            notification_id="utilitati_romania_open_provider_failed",
+        )
+
     hass.services.async_register(DOMENIU, SERVICIU_RELOAD_ALL, _async_handle_reload_all)
+    hass.services.async_register(DOMENIU, SERVICIU_OPEN_PROVIDER, _async_handle_open_provider)
     hass.data[DOMENIU]["_services_registered"] = True
 
 
@@ -223,6 +391,8 @@ def _async_remove_services_if_unused(hass: HomeAssistant) -> None:
         return
     if hass.services.has_service(DOMENIU, SERVICIU_RELOAD_ALL):
         hass.services.async_remove(DOMENIU, SERVICIU_RELOAD_ALL)
+    if hass.services.has_service(DOMENIU, SERVICIU_OPEN_PROVIDER):
+        hass.services.async_remove(DOMENIU, SERVICIU_OPEN_PROVIDER)
     hass.data[DOMENIU]["_services_registered"] = False
 
 

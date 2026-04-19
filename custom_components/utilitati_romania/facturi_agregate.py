@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Any
 
+from homeassistant.helpers import entity_registry as er
+
 from .const import DOMENIU, FURNIZOR_ADMIN_GLOBAL
 from .coordonator import CoordonatorUtilitatiRomania
 from .grupare_facturi import obtine_grupare_factura
@@ -59,6 +61,19 @@ _STATUS_UNPAID_TOKENS = {
     "true",
     "1",
 }
+
+
+def _normalize_status_token(value: Any) -> str:
+    return normalize_text(str(value or "")).strip().lower().replace("_", " ")
+
+
+_NORMALIZED_STATUS_PAID_TOKENS = {_normalize_status_token(item) for item in _STATUS_PAID_TOKENS}
+_NORMALIZED_STATUS_UNPAID_TOKENS = {_normalize_status_token(item) for item in _STATUS_UNPAID_TOKENS}
+
+
+def _status_in(value: Any, candidates: set[str]) -> bool:
+    token = _normalize_status_token(value)
+    return bool(token) and token in candidates
 
 _UNPAID_RAW_KEYS = (
     "amount_remaining",
@@ -211,12 +226,12 @@ def _derive_payment_status(
     if category == "injectie" or (amount_value is not None and amount_value < 0):
         return "credit", True, 0.0
 
-    if status_text and any(token in status_text for token in _STATUS_PAID_TOKENS):
-        return "paid", True, 0.0
-
-    if status_text and any(token in status_text for token in _STATUS_UNPAID_TOKENS):
+    if _status_in(status_text, _NORMALIZED_STATUS_UNPAID_TOKENS):
         unpaid_amount = _extract_unpaid_amount(instantaneu, factura, cont)
         return "unpaid", False, unpaid_amount
+
+    if _status_in(status_text, _NORMALIZED_STATUS_PAID_TOKENS):
+        return "paid", True, 0.0
 
     unpaid_amount = _extract_unpaid_amount(instantaneu, factura, cont)
     if unpaid_amount is not None:
@@ -227,6 +242,15 @@ def _derive_payment_status(
     return "unknown", None, None
 
 
+
+def _refresh_button_entity_id(coordonator: CoordonatorUtilitatiRomania) -> str | None:
+    hass = getattr(coordonator, "hass", None)
+    entry_id = getattr(getattr(coordonator, "intrare", None), "entry_id", None)
+    if not hass or not entry_id:
+        return None
+
+    registry = er.async_get(hass)
+    return registry.async_get_entity_id("button", DOMENIU, f"{entry_id}_actualizare_acum")
 
 
 def _location_fields(
@@ -318,6 +342,8 @@ def _build_invoice_item(
         "is_paid": is_paid,
         "unpaid_amount": unpaid_amount,
         "pdf_url": _extract_pdf_url(factura),
+        "refresh_button_entity_id": _refresh_button_entity_id(coordonator),
+        "can_refresh": _refresh_button_entity_id(coordonator) is not None,
     }
 
 
@@ -472,6 +498,8 @@ def _build_eon_fallback_item(
         "is_paid": is_paid,
         "unpaid_amount": unpaid_amount,
         "pdf_url": None,
+        "refresh_button_entity_id": _refresh_button_entity_id(coordonator),
+        "can_refresh": _refresh_button_entity_id(coordonator) is not None,
     }
 
 
@@ -588,6 +616,8 @@ def _build_ebloc_fallback_item(
         'is_paid': is_paid,
         'unpaid_amount': unpaid_amount,
         'pdf_url': None,
+        'refresh_button_entity_id': _refresh_button_entity_id(coordonator),
+        'can_refresh': _refresh_button_entity_id(coordonator) is not None,
     }
 
 def colecteaza_facturi_agregate(hass) -> list[dict[str, Any]]:

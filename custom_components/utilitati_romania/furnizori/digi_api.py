@@ -534,8 +534,10 @@ class DigiApiClient:
         rows: list[InvoiceSummary] = []
 
         current_html = self._extract_section(html, "Facturi curente", "Facturi achitate")
+        current_invoice_ids: list[str] = []
         if current_html:
             for address_key, invoice_id, issue_date, description, due_date, amount_text in RE_CURRENT_ROW.findall(current_html):
+                current_invoice_ids.append(str(invoice_id))
                 rows.append(
                     InvoiceSummary(
                         invoice_id=str(invoice_id),
@@ -558,7 +560,19 @@ class DigiApiClient:
         if cfg_match:
             try:
                 cfg = json.loads(unescape(cfg_match.group(1).strip()))
-                archive_ids = [str(item["id"]) for item in cfg if item.get("id")]
+                all_ids = [str(item["id"]) for item in cfg if item.get("id")]
+
+                # Digi include în client-invoices-cfg atât factura/facturile curente,
+                # cât și facturile achitate. Pentru arhivă trebuie eliminate mai întâi
+                # ID-urile deja folosite în secțiunea "Facturi curente", altfel prima
+                # factură achitată poate primi greșit ID-ul facturii curente și ajunge
+                # duplicată pe altă adresă.
+                current_ids_remaining = list(current_invoice_ids)
+                for invoice_id in all_ids:
+                    if invoice_id in current_ids_remaining:
+                        current_ids_remaining.remove(invoice_id)
+                        continue
+                    archive_ids.append(invoice_id)
             except json.JSONDecodeError as err:
                 raise DigiError("Invalid invoice config JSON") from err
 
