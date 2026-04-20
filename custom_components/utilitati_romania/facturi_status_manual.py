@@ -56,18 +56,14 @@ def construieste_cheie_status_factura(
     if not entry_text or not provider_text:
         return None
 
-    amount_text = str(amount).strip() if amount not in (None, "") else "-"
-    parts = [
-        entry_text,
-        provider_text,
-        str(id_cont or "").strip() or "-",
-        str(invoice_id or "").strip() or "-",
-        _normalize_part(invoice_title),
-        str(issue_date or "").strip() or "-",
-        amount_text,
-        str(currency or "").strip().upper() or "RON",
-    ]
-    return ":".join(parts)
+    return ":".join(
+        [
+            entry_text,
+            provider_text,
+            str(id_cont or "").strip() or "-",
+            str(invoice_id or "").strip() or "-",
+        ]
+    )
 
 
 async def async_incarca_statusuri_facturi_manuale(hass: HomeAssistant) -> dict[str, dict[str, Any]]:

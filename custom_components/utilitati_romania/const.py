@@ -84,3 +84,4 @@ USER_AGENT = (
 FURNIZOR_ADMIN_GLOBAL = "admin_global"
 SERVICIU_RELOAD_ALL = "reload_all"
 SERVICIU_OPEN_PROVIDER = "open_provider"
+SERVICIU_SET_INVOICE_STATUS = "set_invoice_status"
