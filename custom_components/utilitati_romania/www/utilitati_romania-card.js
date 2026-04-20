@@ -66,6 +66,13 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
     return "Necunoscut";
   }
 
+  _providerEffectiveStatus(provider) {
+    if (provider?.manual_status_override === true) {
+      return "paid";
+    }
+    return this._normalizeStatus(provider?.status || provider?.payment_status || provider?.status_raw);
+  }
+
   _formatDate(value) {
     if (!value || value === "-") return "—";
     const text = String(value).trim();
@@ -181,7 +188,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       .map((location) => {
         const providers = Array.isArray(location.furnizori) ? location.furnizori : [];
         const filteredProviders = providers.filter((provider) => {
-          const status = this._normalizeStatus(provider.status || provider.payment_status || provider.status_raw);
+          const status = this._providerEffectiveStatus(provider);
           if (onlyUnpaid) return status === "unpaid";
           if (!showPaid && status === "paid") return false;
           return true;
@@ -195,9 +202,9 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
 
   _locationSummary(location) {
     const providers = Array.isArray(location.furnizori) ? location.furnizori : [];
-    const paid = providers.filter((item) => this._normalizeStatus(item.status || item.payment_status || item.status_raw) === "paid").length;
-    const unpaid = providers.filter((item) => this._normalizeStatus(item.status || item.payment_status || item.status_raw) === "unpaid").length;
-    const credit = providers.filter((item) => this._normalizeStatus(item.status || item.payment_status || item.status_raw) === "credit").length;
+    const paid = providers.filter((item) => this._providerEffectiveStatus(item) === "paid").length;
+    const unpaid = providers.filter((item) => this._providerEffectiveStatus(item) === "unpaid").length;
+    const credit = providers.filter((item) => this._providerEffectiveStatus(item) === "credit").length;
 
     const parts = [];
     parts.push(`${providers.length} ${providers.length === 1 ? "factură" : "facturi"}`);
@@ -666,11 +673,58 @@ _buildProviderRefreshButton(provider) {
     return "";
   }
 
+  _buildManualInvoiceAction(location, provider, index) {
+    const key = this._rowKey(location, provider, index);
+    const action = this._getActionState("manual_status", key);
+    const isManual = provider?.manual_status_override === true;
+    const isPaidReal = provider.status === "paid" && !isManual;
+    if (isPaidReal) {
+      return "";
+    }
+    const isBusy = action.status === "sending";
+    const label = isManual ? "Anulează marcarea" : "Marchează plătită";
+
+    const payload = {
+      entry_id: provider?.entry_id || "",
+      provider: provider?.furnizor || "",
+      id_cont: provider?.id_cont || "",
+      invoice_id: provider?.invoice_id || "",
+      invoice_title: provider?.invoice_title || "",
+      issue_date: provider?.issue_date || provider?.data_emitere || "",
+      amount: provider?.amount ?? "",
+      currency: provider?.currency || "RON",
+      status: isManual ? "clear" : "paid",
+    };
+
+    return `
+      <button
+        class="provider-app-btn manual-status-btn"
+        data-key="${this._escapeAttr(key)}"
+        data-payload='${this._escapeAttr(JSON.stringify(payload))}'
+        ${isBusy ? "disabled" : ""}
+      >
+        ${isBusy ? "Se salvează..." : this._escapeHtml(label)}
+      </button>
+    `;
+  }
+
+  _buildManualInvoiceStatus(location, provider, index) {
+    const key = this._rowKey(location, provider, index);
+    const action = this._getActionState("manual_status", key);
+    if (action.status === "success") {
+      return `<div class="inline-status status-success">${this._escapeHtml(action.message || "Statusul facturii a fost actualizat.")}</div>`;
+    }
+    if (action.status === "error") {
+      return `<div class="inline-status status-error">${this._escapeHtml(action.message || "Actualizarea statusului a eșuat.")}</div>`;
+    }
+    return "";
+  }
+
   _buildProviderRow(location, provider, index) {
     const supplier = provider.furnizor_label || provider.furnizor || "Furnizor";
     const title = this._providerCompactTitle(provider);
     const amountFormatted = this._formatMoney(provider.amount, provider.currency || "RON");
-    const status = this._normalizeStatus(provider.status || provider.payment_status || provider.status_raw);
+    const status = this._providerEffectiveStatus(provider);
     const statusLabel = this._statusLabel(status);
     const issueDate = this._formatDate(provider.issue_date || provider.data_emitere);
     const dueDate = this._formatDate(provider.due_date || provider.data_scadenta);
@@ -714,18 +768,19 @@ _buildProviderRefreshButton(provider) {
             ? `
               <div class="invoice-details">
                 <div><span class="detail-label">Status:</span> <span class="detail-value ${statusClass}">${this._escapeHtml(statusLabel)}</span></div>
+                ${provider.manual_status_override ? `<div><span class="detail-label">Override local:</span> <span class="detail-value status-paid">${this._escapeHtml(provider.manual_status_label || "Marcată manual ca plătită")}</span></div>` : ""}
                 <div><span class="detail-label">Data emiterii:</span> <span class="detail-value">${this._escapeHtml(issueDate)}</span></div>
                 <div><span class="detail-label">Data scadenței:</span> <span class="detail-value">${this._escapeHtml(dueDate)}</span></div>
                 <div><span class="detail-label">Serviciu:</span> <span class="detail-value">${this._escapeHtml(tipServiciu)}</span></div>
                 <div><span class="detail-label">Cont:</span> <span class="detail-value">${this._escapeHtml(numeCont)}</span></div>
-                ${(provider.pdf_url || this._getProviderAppLabel(provider)) ? `
-                  <div class="detail-actions">
-                    ${provider.pdf_url ? `<button class="pdf-btn" data-url="${this._escapeAttr(provider.pdf_url)}">Deschide PDF</button>` : ""}
-                    ${this._buildProviderOpenAppButton(provider)}
-                  </div>
-                ` : ""}
+                <div class="detail-actions">
+                  ${provider.pdf_url ? `<button class="pdf-btn" data-url="${this._escapeAttr(provider.pdf_url)}">Deschide PDF</button>` : ""}
+                  ${this._buildProviderOpenAppButton(provider)}
+                  ${this._buildManualInvoiceAction(location, provider, index)}
+                </div>
                 ${this._buildReadingControls(location, provider)}
                 ${this._buildProviderRefreshStatus(provider)}
+                ${this._buildManualInvoiceStatus(location, provider, index)}
               </div>
             `
             : ""
@@ -1035,6 +1090,44 @@ _buildProviderRefreshButton(provider) {
     });
 
 
+    root.querySelectorAll(".manual-status-btn[data-payload][data-key]").forEach((button) => {
+      button.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const rowKey = button.getAttribute("data-key");
+        const payloadRaw = button.getAttribute("data-payload");
+        const aggregatedEntityId = this._findEntityId();
+        if (!rowKey || !payloadRaw) return;
+
+        let payload = null;
+        try {
+          payload = JSON.parse(payloadRaw);
+        } catch (_err) {
+          payload = null;
+        }
+        if (!payload) return;
+
+        this._setActionState("manual_status", rowKey, { status: "sending", message: "" });
+        this._render();
+
+        try {
+          await this._hass.callService("utilitati_romania", "set_invoice_status", payload);
+          await this._sleep(500);
+          await this._refreshEntities([aggregatedEntityId]);
+          this._setActionState("manual_status", rowKey, {
+            status: "success",
+            message: payload.status === "paid" ? "Factura a fost marcată local ca plătită." : "Marcarea manuală a fost eliminată.",
+          });
+        } catch (err) {
+          this._setActionState("manual_status", rowKey, {
+            status: "error",
+            message: err?.message || "Actualizarea statusului a eșuat.",
+          });
+        }
+
+        this._render();
+      });
+    });
+
     const licenseToggle = root.querySelector(".license-toggle-btn");
     if (licenseToggle) {
       licenseToggle.addEventListener("click", (event) => {
@@ -1233,7 +1326,7 @@ _buildProviderRefreshButton(provider) {
                     const openReading = this._getAnyOpenReadingForLocation(location);
 
                     const hasUnpaid = (location.furnizori || []).some((p) => {
-                      const status = this._normalizeStatus(p.status || p.payment_status || p.status_raw);
+                      const status = this._providerEffectiveStatus(p);
                       return status === "unpaid";
                     });
 
@@ -1510,7 +1603,7 @@ _buildProviderRefreshButton(provider) {
       }      
 
       .invoice-row-wrap:hover {
-        transform: translateY(-1px);
+        transform: translateY(0px);
         box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
       }
 

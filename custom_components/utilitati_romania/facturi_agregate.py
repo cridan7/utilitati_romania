@@ -8,6 +8,7 @@ from homeassistant.helpers import entity_registry as er
 from .const import DOMENIU, FURNIZOR_ADMIN_GLOBAL
 from .coordonator import CoordonatorUtilitatiRomania
 from .grupare_facturi import obtine_grupare_factura
+from .facturi_status_manual import construieste_cheie_status_factura
 from .helpers_facturi_locatie import (
     build_facturi_location_label,
     normalize_facturi_location_key,
@@ -69,6 +70,54 @@ def _normalize_status_token(value: Any) -> str:
 
 _NORMALIZED_STATUS_PAID_TOKENS = {_normalize_status_token(item) for item in _STATUS_PAID_TOKENS}
 _NORMALIZED_STATUS_UNPAID_TOKENS = {_normalize_status_token(item) for item in _STATUS_UNPAID_TOKENS}
+
+def _manual_invoice_status(hass, item: dict[str, Any]) -> dict[str, Any] | None:
+    domain_data = hass.data.get(DOMENIU, {}) if hasattr(hass, "data") else {}
+    cache = domain_data.get("_status_facturi_manual")
+    if not isinstance(cache, dict) or not cache:
+        return None
+
+    cheie = construieste_cheie_status_factura(
+        item.get("entry_id"),
+        item.get("furnizor"),
+        item.get("id_cont"),
+        item.get("invoice_id"),
+        item.get("invoice_title"),
+        item.get("issue_date"),
+        item.get("amount"),
+        item.get("currency"),
+    )
+    if not cheie:
+        return None
+
+    value = cache.get(cheie)
+    return dict(value) if isinstance(value, dict) else None
+
+
+def _apply_manual_invoice_status(hass, item: dict[str, Any] | None) -> dict[str, Any] | None:
+    if item is None:
+        return None
+
+    override = _manual_invoice_status(hass, item)
+    if not override:
+        item["manual_status_override"] = False
+        return item
+
+    status = str(override.get("status") or "").strip().lower()
+    if status != "paid":
+        item["manual_status_override"] = False
+        return item
+
+    original_status = item.get("status")
+    item["status_original"] = original_status
+    item["manual_status_override"] = True
+    item["manual_status_label"] = "Marcată manual ca plătită"
+    item["manual_status_updated_at"] = override.get("updated_at")
+    item["status"] = "paid"
+    item["payment_status"] = "paid"
+    item["is_paid"] = True
+    item["unpaid_amount"] = 0.0
+    return item
 
 
 def _status_in(value: Any, candidates: set[str]) -> bool:
@@ -637,7 +686,7 @@ def colecteaza_facturi_agregate(hass) -> list[dict[str, Any]]:
 
         # 1. Facturi reale, dacă există
         for factura in instantaneu.facturi or []:
-            item = _build_invoice_item(maybe_coord, instantaneu, factura)
+            item = _apply_manual_invoice_status(hass, _build_invoice_item(maybe_coord, instantaneu, factura))
 
             # Pentru cardul de "ultima factură" ignorăm documentele de tip credit/storno.
             # Altfel, la unii furnizori (ex. myElectrica) putem afișa greșit un credit
@@ -657,7 +706,7 @@ def colecteaza_facturi_agregate(hass) -> list[dict[str, Any]]:
         # 2. Fallback specific E.ON din consumuri, doar pentru corectarea statusului curent
         if instantaneu.furnizor == "eon":
             for cont in instantaneu.conturi or []:
-                fallback_item = _build_eon_fallback_item(maybe_coord, instantaneu, cont)
+                fallback_item = _apply_manual_invoice_status(hass, _build_eon_fallback_item(maybe_coord, instantaneu, cont))
                 if fallback_item is None:
                     continue
 
@@ -676,6 +725,9 @@ def colecteaza_facturi_agregate(hass) -> list[dict[str, Any]]:
                 # Dacă fallback-ul spune plătită, lăsăm itemul existent în pace,
                 # pentru a nu strica situațiile deja corecte.
                 if fallback_item.get("status") == "unpaid":
+                    if current.get("manual_status_override"):
+                        continue
+
                     current["status_raw"] = fallback_item.get("status_raw")
                     current["status"] = "unpaid"
                     current["payment_status"] = "unpaid"
@@ -696,7 +748,7 @@ def colecteaza_facturi_agregate(hass) -> list[dict[str, Any]]:
         # întreținerea curentă sau ultima plată, în funcție de status.
         if instantaneu.furnizor == "ebloc":
             for cont in instantaneu.conturi or []:
-                fallback_item = _build_ebloc_fallback_item(maybe_coord, instantaneu, cont)
+                fallback_item = _apply_manual_invoice_status(hass, _build_ebloc_fallback_item(maybe_coord, instantaneu, cont))
                 if fallback_item is None:
                     continue
 
@@ -708,6 +760,9 @@ def colecteaza_facturi_agregate(hass) -> list[dict[str, Any]]:
                 current = grouped.get(group_key)
                 if current is None:
                     grouped[group_key] = fallback_item
+                    continue
+
+                if current.get("manual_status_override"):
                     continue
 
                 # eBloc nu expune facturi clasice consistente; fallback-ul este sursa de adevăr.

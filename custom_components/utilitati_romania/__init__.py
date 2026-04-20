@@ -21,9 +21,11 @@ from .const import (
     FURNIZOR_ADMIN_GLOBAL,
     SERVICIU_RELOAD_ALL,
     SERVICIU_OPEN_PROVIDER,
+    SERVICIU_SET_INVOICE_STATUS,
 )
 from .coordonator import CoordonatorUtilitatiRomania
 from .grupare_facturi import async_incarca_grupari_facturi
+from .facturi_status_manual import async_incarca_statusuri_facturi_manuale, async_seteaza_status_manual_factura
 from .deer_device import alias_loc_deer, slug_loc_deer
 from .eon_device import alias_loc_eon, slug_loc_eon
 from .hidro_device import alias_loc_consum, slug_loc_consum
@@ -380,8 +382,43 @@ def _async_ensure_services(hass: HomeAssistant) -> None:
             notification_id="utilitati_romania_open_provider_failed",
         )
 
+
+    async def _async_handle_set_invoice_status(call: ServiceCall) -> None:
+        entry_id = str(call.data.get("entry_id") or "").strip()
+        provider = str(call.data.get("provider") or "").strip().lower()
+        status = str(call.data.get("status") or "").strip().lower()
+
+        if not entry_id or not provider:
+            raise ValueError("entry_id și provider sunt obligatorii.")
+
+        if status not in {"paid", "clear"}:
+            raise ValueError("status trebuie să fie paid sau clear.")
+
+        ok = await async_seteaza_status_manual_factura(
+            hass,
+            entry_id=entry_id,
+            furnizor=provider,
+            id_cont=call.data.get("id_cont"),
+            invoice_id=call.data.get("invoice_id"),
+            invoice_title=call.data.get("invoice_title"),
+            issue_date=call.data.get("issue_date"),
+            amount=call.data.get("amount"),
+            currency=call.data.get("currency"),
+            status=("paid" if status == "paid" else None),
+        )
+        if not ok:
+            raise ValueError("Factura nu a putut fi identificată pentru marcarea manuală.")
+
+        await hass.services.async_call(
+            "homeassistant",
+            "update_entity",
+            {"entity_id": ["sensor.administrare_integrare_facturi_utilitati"]},
+            blocking=False,
+        )
+
     hass.services.async_register(DOMENIU, SERVICIU_RELOAD_ALL, _async_handle_reload_all)
     hass.services.async_register(DOMENIU, SERVICIU_OPEN_PROVIDER, _async_handle_open_provider)
+    hass.services.async_register(DOMENIU, SERVICIU_SET_INVOICE_STATUS, _async_handle_set_invoice_status)
     hass.data[DOMENIU]["_services_registered"] = True
 
 
@@ -393,6 +430,8 @@ def _async_remove_services_if_unused(hass: HomeAssistant) -> None:
         hass.services.async_remove(DOMENIU, SERVICIU_RELOAD_ALL)
     if hass.services.has_service(DOMENIU, SERVICIU_OPEN_PROVIDER):
         hass.services.async_remove(DOMENIU, SERVICIU_OPEN_PROVIDER)
+    if hass.services.has_service(DOMENIU, SERVICIU_SET_INVOICE_STATUS):
+        hass.services.async_remove(DOMENIU, SERVICIU_SET_INVOICE_STATUS)
     hass.data[DOMENIU]["_services_registered"] = False
 
 
@@ -541,6 +580,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     _async_ensure_services(hass)
     _async_schedule_admin_reload_after_start(hass)
     await async_incarca_grupari_facturi(hass)
+    await async_incarca_statusuri_facturi_manuale(hass)
     await _async_register_static_paths(hass)
     await _async_notify_missing_lovelace_resource(hass)
     return True
@@ -550,6 +590,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMENIU, {})
     _async_ensure_services(hass)
     await async_incarca_grupari_facturi(hass)
+    await async_incarca_statusuri_facturi_manuale(hass)
     await _async_register_static_paths(hass)
     await _async_notify_missing_lovelace_resource(hass)
 
