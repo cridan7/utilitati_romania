@@ -19,6 +19,12 @@ Centralizează facturi, notificări și transmiterea indexului într-un singur l
 - 🧩 Integrare nativă Home Assistant
 
 ---
+## ✨ Funcționalități noi (v1.6.0)
+
+- Marcarea manuală a facturilor ca plătite
+- Status persistent (se păstrează după refresh și restart)
+- Posibilitatea de a anula marcarea
+- Interfață adaptivă (butonul dispare pentru facturile deja plătite)
 
 ## 🖼️ Interfață
 
