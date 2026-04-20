@@ -26,6 +26,12 @@ Centralizează facturi, notificări și transmiterea indexului într-un singur l
 - Posibilitatea de a anula marcarea
 - Interfață adaptivă (butonul dispare pentru facturile deja plătite)
 
+### Marcarea manuală a facturilor
+
+În situațiile în care plata este efectuată în altă aplicație (ex: bancă), iar furnizorul întârzie actualizarea statusului, poți marca manual factura ca plătită direct din cardul integrării.
+
+Statusul este salvat local și se reflectă imediat în interfață.
+
 ## 🖼️ Interfață
 
 ### Card facturi utilități
