@@ -134,7 +134,6 @@ class TextGrupareFacturi(RestoreEntity, TextEntity):
         self._attr_unique_id = f"{self._entry.entry_id}_{self._furnizor}_{self._id_cont}_grupare_facturi"
         self._attr_name = f"{provider_name} · Grupare facturi {alias}"
         self._attr_suggested_object_id = f"{self._furnizor}_{self._id_cont}_{slug}_grupare_facturi"
-        self.entity_id = f"text.{self._furnizor}_{self._id_cont}_{slug}_grupare_facturi"
         self._attr_device_info = _grupare_facturi_device_info()
         self._attr_entity_category = EntityCategory.CONFIG
         self._attr_native_value = ""

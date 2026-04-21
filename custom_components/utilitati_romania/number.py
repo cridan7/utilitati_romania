@@ -82,7 +82,6 @@ class NumarIndexHidro(EntitateUtilitatiRomania, RestoreNumber):
         self._attr_suggested_object_id = (
             f"hidro_{cont.id_cont}_{slug}_index_energie_electrica"
         )
-        self.entity_id = f"number.hidro_{cont.id_cont}_{slug}_index_energie_electrica"
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -217,7 +216,6 @@ class NumarIndexEbloc(EntitateUtilitatiRomania, RestoreNumber):
         self._attr_name = f"Index {contor['titlu']} de trimis"
         self._attr_device_info = info_device_ebloc_apartament(coordonator.intrare.entry_id, cont)
         self._attr_suggested_object_id = f"ebloc_{slug}_index_{contor['slug']}_de_trimis"
-        self.entity_id = f"number.ebloc_{slug}_index_{contor['slug']}_de_trimis"
         self._attr_native_value = 0.0
 
     async def async_added_to_hass(self) -> None:

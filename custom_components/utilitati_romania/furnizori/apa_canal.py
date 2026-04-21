@@ -155,8 +155,8 @@ class ApiApaCanal:
             if not problema_ssl:
                 raise
             if not self._fallback_ssl_insecure:
-                _LOGGER.warning(
-                    "Portalul Apă Canal Sibiu are probleme cu lanțul SSL. Se folosește fallback verify=False."
+                _LOGGER.debug(
+                    "Fallback SSL activat pentru Apă Canal Sibiu (verify=False)"
                 )
                 self._fallback_ssl_insecure = True
             return self._session.request(metoda, url, verify=False, **kwargs)

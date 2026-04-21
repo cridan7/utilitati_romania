@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timedelta
 import logging
 from typing import Any
@@ -40,6 +41,7 @@ class CoordonatorUtilitatiRomania(DataUpdateCoordinator[InstantaneuFurnizor]):
         self.sesiune: ClientSession = async_get_clientsession(hass)
         self._manager_notificari = ManagerNotificari(hass)
         self._notificari_incarcate = False
+        self._task_refresh_initial_deer: asyncio.Task[None] | None = None
 
         interval_ore = intrare.options.get(
             CONF_INTERVAL_ACTUALIZARE,
@@ -71,9 +73,63 @@ class CoordonatorUtilitatiRomania(DataUpdateCoordinator[InstantaneuFurnizor]):
         )
 
     async def async_inchide(self) -> None:
+        if self._task_refresh_initial_deer is not None:
+            self._task_refresh_initial_deer.cancel()
+            try:
+                await self._task_refresh_initial_deer
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self._task_refresh_initial_deer = None
+
         inchidere = getattr(self.client, "async_inchide", None)
         if callable(inchidere):
             await inchidere()
+
+    def _porneste_refresh_initial_deer_in_fundal(self) -> None:
+        if self._task_refresh_initial_deer is not None and not self._task_refresh_initial_deer.done():
+            return
+
+        self._task_refresh_initial_deer = self.hass.async_create_task(
+            self._async_refresh_initial_deer_in_fundal()
+        )
+
+    async def _async_refresh_initial_deer_in_fundal(self) -> None:
+        try:
+            instantaneu = await self.client.async_obtine_instantaneu_complet()
+
+            try:
+                snapshot = self._construieste_snapshot_notificari(instantaneu)
+                await self._manager_notificari.proceseaza(snapshot)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Procesarea notificărilor a eșuat pentru %s: %s",
+                    self.cheie_furnizor,
+                    err,
+                )
+
+            self.async_set_updated_data(instantaneu)
+
+        except EroareAutentificare as err:
+            _LOGGER.warning(
+                "Refresh-ul inițial în fundal a eșuat pentru %s din cauza autentificării: %s",
+                self.cheie_furnizor,
+                err,
+            )
+        except EroareConectare as err:
+            _LOGGER.warning(
+                "Refresh-ul inițial în fundal a eșuat pentru %s din cauza conexiunii: %s",
+                self.cheie_furnizor,
+                err,
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning(
+                "Refresh-ul inițial în fundal a eșuat pentru %s: %s",
+                self.cheie_furnizor,
+                err,
+            )
+        finally:
+            self._task_refresh_initial_deer = None
 
     async def _async_update_data(self) -> InstantaneuFurnizor:
         if not self._notificari_incarcate:
@@ -96,6 +152,16 @@ class CoordonatorUtilitatiRomania(DataUpdateCoordinator[InstantaneuFurnizor]):
             raise UpdateFailed(f"Licență invalidă: {err}") from err
 
         try:
+            if (
+                self.cheie_furnizor == "deer"
+                and self.data is None
+                and hasattr(self.client, "async_obtine_instantaneu_minim")
+                and hasattr(self.client, "async_obtine_instantaneu_complet")
+            ):
+                instantaneu = await self.client.async_obtine_instantaneu_minim()
+                self._porneste_refresh_initial_deer_in_fundal()
+                return instantaneu
+
             instantaneu = await self.client.async_obtine_instantaneu()
 
             try:

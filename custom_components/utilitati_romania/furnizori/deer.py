@@ -115,7 +115,6 @@ def _extract_selected_pods(xml_text: str) -> list[dict[str, str]]:
         adresa = ""
 
         if len(cells) >= 3:
-            # jqGrid expune: ID ascuns, POD, Adresa
             pod_code = cells[1]
             adresa = cells[2]
         elif len(cells) == 2:
@@ -367,13 +366,64 @@ class ClientFurnizorDeer(ClientFurnizor):
 
         raise EroareParsare(f"Nu am putut selecta corect POD-ul {expected_pod}")
 
+    async def _obtine_conturi_minime(self) -> list[ContUtilitate]:
+        pods = await self._obtine_lista_poduri()
+
+        conturi: list[ContUtilitate] = []
+        for item in pods:
+            pod_code = _safe_text(item.get("pod"))
+            adresa = _safe_text(item.get("adresa"))
+            nume_cont = adresa or f"POD {pod_code}"
+
+            conturi.append(
+                ContUtilitate(
+                    id_cont=pod_code,
+                    nume=nume_cont,
+                    tip_cont="pod",
+                    id_contract=pod_code,
+                    adresa=adresa or None,
+                    stare="necunoscut",
+                    tip_utilitate="energie",
+                    tip_serviciu="distribuție energie electrică",
+                    este_prosumator=False,
+                    date_brute={
+                        "pod": pod_code,
+                        "adresa_loc_consum": adresa or None,
+                        "incarcare_initiala": True,
+                    },
+                )
+            )
+
+        return conturi
+
     async def async_testeaza_conexiunea(self) -> str:
         pods = await self._obtine_lista_poduri()
         if not pods:
             raise EroareParsare("Nu există POD-uri disponibile în contul DEER")
         return self.utilizator.lower()
 
+    async def async_obtine_instantaneu_minim(self) -> InstantaneuFurnizor:
+        conturi = await self._obtine_conturi_minime()
+
+        return InstantaneuFurnizor(
+            furnizor=self.cheie_furnizor,
+            titlu=self.nume_prietenos,
+            conturi=conturi,
+            facturi=[],
+            consumuri=[
+                ConsumUtilitate("numar_conturi", len(conturi), None, tip_utilitate="energie", tip_serviciu="distribuție"),
+                ConsumUtilitate("este_prosumator", "nu", None, tip_utilitate="energie", tip_serviciu="distribuție"),
+            ],
+            extra={
+                "suport_transmitere_index": False,
+                "incarcare_initiala": True,
+            },
+        )
+
     async def async_obtine_instantaneu(self) -> InstantaneuFurnizor:
+        return await self.async_obtine_instantaneu_complet()
+
+    async def async_obtine_instantaneu_complet(self) -> InstantaneuFurnizor:
         pods = await self._obtine_lista_poduri()
         conturi: list[ContUtilitate] = []
         consumuri: list[ConsumUtilitate] = []
@@ -513,6 +563,7 @@ class ClientFurnizorDeer(ClientFurnizor):
                         "pagina_cont": html_cont,
                         "pagina_pod": html_pod,
                         "pagina_pv": html_pv,
+                        "incarcare_initiala": False,
                     },
                 )
             )
@@ -554,6 +605,30 @@ class ClientFurnizorDeer(ClientFurnizor):
                         )
                     )
 
+            if index_energie_electrica not in (None, "", "-"):
+                consumuri.append(
+                    ConsumUtilitate(
+                        "index_energie_electrica",
+                        index_energie_electrica,
+                        "kWh",
+                        id_cont=pod_code,
+                        tip_utilitate="energie",
+                        tip_serviciu="distribuție",
+                    )
+                )
+
+            if citire_permisa not in (None, "", "-"):
+                consumuri.append(
+                    ConsumUtilitate(
+                        "citire_permisa",
+                        citire_permisa,
+                        None,
+                        id_cont=pod_code,
+                        tip_utilitate="energie",
+                        tip_serviciu="distribuție",
+                    )
+                )
+
             if not cod_client_general and cod_client:
                 cod_client_general = cod_client
             if not nume_client_general and nume_client:
@@ -574,7 +649,10 @@ class ClientFurnizorDeer(ClientFurnizor):
             conturi=conturi,
             facturi=[],
             consumuri=consumuri,
-            extra={"suport_transmitere_index": False},
+            extra={
+                "suport_transmitere_index": False,
+                "incarcare_initiala": False,
+            },
         )
 
 
