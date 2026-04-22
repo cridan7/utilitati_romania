@@ -28,7 +28,7 @@ from .naming import build_provider_slug, extract_street_slug, build_location_ali
 from .licentiere import async_obtine_licenta_globala, mascheaza_cheia_licenta
 from .facturi_agregate import colecteaza_facturi_agregate, sumar_facturi
 from .const import DOMENIU, CONF_FURNIZOR, FURNIZOR_ADMIN_GLOBAL
-
+from .storage_citiri import async_incarca_cache_citiri, obtine_citire_cache
 
 def _cont_curent_dupa_id(coordonator: CoordonatorUtilitatiRomania, id_cont: str | None):
     data = getattr(coordonator, "data", None)
@@ -844,6 +844,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    await async_incarca_cache_citiri(hass)
     if entry.data.get(CONF_FURNIZOR) == FURNIZOR_ADMIN_GLOBAL:
         async_add_entities([
             SenzorAdminLicenta(entry, "status", "Status licență"),
@@ -974,13 +975,21 @@ class SenzorContHidroelectrica(EntitateUtilitatiRomania, SensorEntity):
     @property
     def extra_state_attributes(self):
         cont = self._cont_actual
-        return {
+
+        attrs = {
             "id_cont": cont.id_cont,
             "nume_cont": cont.nume,
             "tip_serviciu": cont.tip_serviciu,
             "tip_utilitate": cont.tip_utilitate,
             "adresa": cont.adresa,
         }
+
+        citire = obtine_citire_cache(self.hass, "hidroelectrica", cont.id_cont)
+        if citire:
+            attrs["ultima_citire_transmisa"] = citire.get("valoare")
+            attrs["ultima_citire_transmisa_la"] = citire.get("timestamp")
+
+        return attrs
 
 
 class SenzorContEon(EntitateUtilitatiRomania, SensorEntity):

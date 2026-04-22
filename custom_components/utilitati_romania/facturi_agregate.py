@@ -37,10 +37,6 @@ _STATUS_PAID_TOKENS = {
     "plătită",
     "stins",
     "stinsa",
-    "nu",
-    "no",
-    "false",
-    "0",
 }
 
 _STATUS_UNPAID_TOKENS = {
@@ -275,17 +271,24 @@ def _derive_payment_status(
     if category == "injectie" or (amount_value is not None and amount_value < 0):
         return "credit", True, 0.0
 
+    # Semnalele financiare concrete bat tokenii textuali ambigui.
+    # Dacă furnizorul expune sold/de_plata/total_neachitat pentru cont,
+    # folosim acea valoare ca sursă de adevăr înainte de interpretarea
+    # generică a câmpului "stare".
+    unpaid_amount = _extract_unpaid_amount(instantaneu, factura, cont)
+    if unpaid_amount is not None:
+        if unpaid_amount > 0:
+            return "unpaid", False, unpaid_amount
+        if _status_in(status_text, _NORMALIZED_STATUS_PAID_TOKENS):
+            return "paid", True, 0.0
+
     if _status_in(status_text, _NORMALIZED_STATUS_UNPAID_TOKENS):
-        unpaid_amount = _extract_unpaid_amount(instantaneu, factura, cont)
         return "unpaid", False, unpaid_amount
 
     if _status_in(status_text, _NORMALIZED_STATUS_PAID_TOKENS):
         return "paid", True, 0.0
 
-    unpaid_amount = _extract_unpaid_amount(instantaneu, factura, cont)
     if unpaid_amount is not None:
-        if unpaid_amount > 0:
-            return "unpaid", False, unpaid_amount
         return "paid", True, 0.0
 
     return "unknown", None, None

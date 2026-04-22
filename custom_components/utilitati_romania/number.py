@@ -14,6 +14,22 @@ from .ebloc_device import info_device_ebloc_apartament, slug_apartament_ebloc
 from .myelectrica_device import alias_loc_myelectrica, info_device_myelectrica, slug_loc_myelectrica
 
 
+def _valoare_consum_curent(coordonator: CoordonatorUtilitatiRomania, id_cont: str, cheie: str) -> float | None:
+    data = getattr(coordonator, 'data', None)
+    consumuri = getattr(data, 'consumuri', None) or []
+    for consum in consumuri:
+        if getattr(consum, 'id_cont', None) != id_cont:
+            continue
+        if getattr(consum, 'cheie', None) != cheie:
+            continue
+        valoare = getattr(consum, 'valoare', None)
+        try:
+            return float(valoare) if valoare is not None else None
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -82,12 +98,17 @@ class NumarIndexHidro(EntitateUtilitatiRomania, RestoreNumber):
         self._attr_suggested_object_id = (
             f"hidro_{cont.id_cont}_{slug}_index_energie_electrica"
         )
+        self.entity_id = f"number.hidro_{cont.id_cont}_{slug}_index_energie_electrica"
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         ultima_stare = await self.async_get_last_number_data()
         if ultima_stare and ultima_stare.native_value is not None:
             self._attr_native_value = ultima_stare.native_value
+        else:
+            valoare_curenta = _valoare_consum_curent(self.coordinator, self.cont.id_cont, 'index_energie_electrica')
+            if valoare_curenta is not None:
+                self._attr_native_value = valoare_curenta
 
     async def async_set_native_value(self, value: float) -> None:
         self._attr_native_value = value
@@ -216,6 +237,7 @@ class NumarIndexEbloc(EntitateUtilitatiRomania, RestoreNumber):
         self._attr_name = f"Index {contor['titlu']} de trimis"
         self._attr_device_info = info_device_ebloc_apartament(coordonator.intrare.entry_id, cont)
         self._attr_suggested_object_id = f"ebloc_{slug}_index_{contor['slug']}_de_trimis"
+        self.entity_id = f"number.ebloc_{slug}_index_{contor['slug']}_de_trimis"
         self._attr_native_value = 0.0
 
     async def async_added_to_hass(self) -> None:

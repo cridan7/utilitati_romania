@@ -23,6 +23,8 @@ from .ebloc_device import info_device_ebloc, info_device_ebloc_apartament, slug_
 from .furnizori.hidroelectrica_helper import build_usage_entity, safe_get
 from .myelectrica_device import alias_loc_myelectrica, info_device_myelectrica, slug_loc_myelectrica
 
+from .storage_citiri import async_salveaza_citire
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -255,6 +257,21 @@ class ButonTrimiteIndexHidro(EntitateUtilitatiRomania, ButtonEntity):
             account_number=account_number,
             usage_entity=usage_entities,
         )
+
+        await async_salveaza_citire(
+            self.hass,
+            "hidroelectrica",
+            self.cont.id_cont,
+            float(index_value),
+        )
+
+        await async_salveaza_citire(
+            self.hass,
+            "hidroelectrica",
+            self.cont.id_cont,
+            float(index_value),
+        )
+
         await self.coordinator.async_request_refresh()
 
 

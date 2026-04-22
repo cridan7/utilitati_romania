@@ -348,6 +348,18 @@ class CoordonatorUtilitatiRomania(DataUpdateCoordinator[InstantaneuFurnizor]):
                 if start and end:
                     return start, end
 
+        # Fallback util mai ales pentru Hidroelectrica:
+        # dacă integrarea știe deja că citirea este permisă, dar API-ul nu oferă
+        # date de început/sfârșit într-un format parsabil, construim o fereastră
+        # minimă artificială pentru a permite logica de notificare.
+        previous_read = raw.get("previous_meter_read") or {}
+        previous_data = previous_read.get("result", {}).get("Data", []) if isinstance(previous_read, dict) else []
+        citire_permisa = bool(previous_data)
+
+        if citire_permisa:
+            azi = date.today()
+            return azi.isoformat(), (azi + timedelta(days=5)).isoformat()
+
         return None
 
     def _factura_este_platita(self, factura: Any) -> bool:
@@ -437,7 +449,9 @@ class CoordonatorUtilitatiRomania(DataUpdateCoordinator[InstantaneuFurnizor]):
         }:
             return False
 
-        return True
+        # fallback corect:
+        # dacă nu știm sigur că e plătită → o considerăm NEPLĂTITĂ
+        return False
 
     def _construieste_id_factura(self, factura: Any, instantaneu: InstantaneuFurnizor) -> str | None:
         id_factura = getattr(factura, "id_factura", None)

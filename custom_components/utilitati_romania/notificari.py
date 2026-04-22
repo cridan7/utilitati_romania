@@ -61,8 +61,12 @@ class ManagerNotificari:
                     return
 
                 changed = False
+                fortat = not self._initializat
                 changed |= await self._proceseaza_facturi(facturi)
-                changed |= await self._proceseaza_index(ferestre_index)
+                changed |= await self._proceseaza_index(
+                    ferestre_index,
+                    fortat=fortat,
+                )
 
                 self._initializat = True
                 await self._salveaza()
@@ -149,7 +153,11 @@ class ManagerNotificari:
 
         return changed
 
-    async def _proceseaza_index(self, ferestre: list[dict[str, Any]]) -> bool:
+    async def _proceseaza_index(
+        self,
+        ferestre: list[dict[str, Any]],
+        fortat: bool = False,
+    ) -> bool:
         azi = datetime.now().date()
         changed = False
 
@@ -173,7 +181,7 @@ class ManagerNotificari:
             key_index = f"{furnizor}_{cont}_index_start_{start}"
             locatie = self._format_locatie(adresa, nume_cont)
 
-            if start_d <= azi <= end_d and key_index not in self._date_notificate:
+            if start_d <= azi <= end_d and (fortat or key_index not in self._date_notificate):
                 await self._trimite(
                     cheie=key_index,
                     tip="index_start",

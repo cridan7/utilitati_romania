@@ -24,6 +24,9 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (this._isReadingInputActive() && !this._hasPendingReadingAction()) {
+      return;
+    }
     this._render();
   }
 
@@ -280,10 +283,15 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
   }
 
   _findReadingSensor(location, provider) {
-    const providerKey = String(provider?.furnizor || "").toLowerCase();
+    const providerKey = String(provider?.furnizor || "").trim().toLowerCase();
     const targetIdCont = String(provider?.id_cont ?? "").trim();
     const targetIdContract = String(provider?.id_contract ?? "").trim();
     const terms = this._readingTerms(location, provider);
+    const normalizedProvider = providerKey.replace(/_/g, " ");
+
+    if (!providerKey || !["hidroelectrica", "eon", "myelectrica", "ebloc"].includes(providerKey)) {
+      return null;
+    }
 
     const candidates = Object.values(this._hass?.states || {}).filter((stateObj) => {
       if (!stateObj?.entity_id?.startsWith("sensor.")) return false;
@@ -291,11 +299,16 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       const attrs = stateObj.attributes || {};
       const text = this._entityFriendlyText(stateObj);
 
-      return !!(
+      const looksLikeReadingSensor = !!(
         entityId.includes("citire_permisa") ||
         text.includes("citire permisa") ||
         attrs.inceput_perioada || attrs.sfarsit_perioada || attrs["Perioadă start"] || attrs["Perioadă sfârșit"]
       );
+
+      if (!looksLikeReadingSensor) return false;
+
+      const providerMatches = entityId.includes(providerKey) || text.includes(normalizedProvider);
+      return providerMatches;
     });
 
     let best = null;
@@ -307,18 +320,30 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       const text = this._entityFriendlyText(stateObj);
       let score = 0;
 
-      if (providerKey && (entityId.includes(providerKey) || text.includes(providerKey.replace(/_/g, " ")))) score += 20;
+      score += 50; // provider match is already mandatory
 
       const attrIdCont = String(attrs.id_cont ?? "").trim();
-      if (targetIdCont && attrIdCont && attrIdCont === targetIdCont) score += 100;
+      if (targetIdCont && attrIdCont) {
+        if (attrIdCont === targetIdCont) {
+          score += 120;
+        } else {
+          continue;
+        }
+      }
 
       const attrContract = String(attrs.id_contract ?? attrs.cod_contract ?? "").trim();
-      if (targetIdContract && attrContract && attrContract === targetIdContract) score += 80;
+      if (targetIdContract && attrContract) {
+        if (attrContract === targetIdContract) {
+          score += 100;
+        } else {
+          continue;
+        }
+      }
 
       const attrAddress = this._normalizeText(attrs.adresa || attrs["Adresă"] || attrs.apartament || attrs.nume_cont || "");
-      if (attrAddress && this._textMatchesAny(attrAddress, terms)) score += 50;
+      if (attrAddress && this._textMatchesAny(attrAddress, terms)) score += 70;
 
-      if (this._textMatchesAny(text, terms)) score += 60;
+      if (this._textMatchesAny(text, terms)) score += 80;
 
       if (score > bestScore) {
         best = stateObj;
@@ -326,7 +351,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       }
     }
 
-    return bestScore > 0 ? best : null;
+    return bestScore >= 50 ? best : null;
   }
 
   _extractWindowInfo(sensorState) {
@@ -516,6 +541,12 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
       };
     });
 
+    if (!controls.length) {
+      const empty = { available: false, isOpen: false, controls: [], start: null, end: null, badge: null };
+      this._readingCache.set(cacheKey, empty);
+      return empty;
+    }
+
     const result = {
       available: true,
       isOpen: !!windowInfo.isOpen,
@@ -545,6 +576,31 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
 
   _actionStateKey(type, entityId) {
     return `${type}__${entityId}`;
+  }
+
+  _isReadingInputActive() {
+    const active = this?.content?.getRootNode?.().activeElement || document.activeElement;
+    return !!(active && active.classList && active.classList.contains("reading-input"));
+  }
+
+  _hasPendingReadingAction() {
+    return Object.entries(this._actionState || {}).some(([key, value]) => {
+      return key.startsWith("reading__") && value && value.status === "sending";
+    });
+  }
+
+  _getBackendReadingHistoryEntry(control) {
+    const attrs = control?.currentState?.attributes || {};
+    const value = attrs.ultima_citire_transmisa;
+    const timestamp = attrs.ultima_citire_transmisa_la;
+    if (value === undefined || value === null || value === "" || !timestamp) {
+      return null;
+    }
+    return {
+      value,
+      unit: control?.unit || control?.currentState?.attributes?.unit_of_measurement || "",
+      timestamp,
+    };
   }
 
   _getActionState(type, entityId) {
@@ -591,9 +647,23 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
         const currentText = control.currentValue && !["unknown", "unavailable"].includes(control.currentValue)
           ? `${control.currentValue}${control.unit ? ` ${control.unit}` : ""}`
           : "—";
+        const lastSent = this._getBackendReadingHistoryEntry(control);
+        const lastSentHtml = lastSent
+          ? `<div class="reading-last-sent">Ultima transmitere: <strong>${this._escapeHtml(String(lastSent.value))}${this._escapeHtml(lastSent.unit ? ` ${lastSent.unit}` : "")}</strong> — ${this._escapeHtml(this._formatDateTime(lastSent.timestamp))}</div>`
+          : "";
 
         return `
-          <div class="reading-control" data-number-entity="${this._escapeAttr(control.numberEntityId || "")}" data-button-entity="${this._escapeAttr(control.buttonEntityId || "")}">
+          <div
+            class="reading-control"
+            data-number-entity="${this._escapeAttr(control.numberEntityId || "")}"
+            data-button-entity="${this._escapeAttr(control.buttonEntityId || "")}"
+            data-provider="${this._escapeAttr(String(provider?.furnizor || ""))}"
+            data-id-cont="${this._escapeAttr(String(provider?.id_cont || ""))}"
+            data-id-contract="${this._escapeAttr(String(provider?.id_contract || ""))}"
+            data-control-label="${this._escapeAttr(String(control.label || ""))}"
+            data-current-value="${this._escapeAttr(String(control.currentValue ?? ""))}"
+            data-unit="${this._escapeAttr(String(control.unit || ""))}"
+          >
             <div class="reading-control-header">
               <div class="reading-control-title">${this._escapeHtml(control.label || "Index")}</div>
               <div class="reading-control-current">Index curent: ${this._escapeHtml(currentText)}</div>
@@ -612,6 +682,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
                 ${disabled ? "Se trimite..." : "Trimite index"}
               </button>
             </div>
+            ${lastSentHtml}
             ${
               action.status === "success"
                 ? `<div class="inline-status status-success">${this._escapeHtml(action.message || "Index trimis cu succes.")}</div>`
@@ -1230,13 +1301,55 @@ _buildProviderRefreshButton(provider) {
           return;
         }
 
+        const numericValue = this._toNumber(value);
+        if (!Number.isFinite(numericValue) || numericValue <= 0) {
+          this._setActionState("reading", buttonEntityId, {
+            status: "error",
+            message: "Introdu o valoare numerică validă pentru index.",
+          });
+          this._render();
+          return;
+        }
+
+        const control = {
+          numberEntityId,
+          buttonEntityId,
+          label: String(wrapper?.getAttribute("data-control-label") || "Index de transmis"),
+          currentValue: String(wrapper?.getAttribute("data-current-value") || ""),
+          unit: String(wrapper?.getAttribute("data-unit") || ""),
+        };
+
+        const currentNumeric = this._toNumber(control.currentValue);
+        if (Number.isFinite(currentNumeric) && currentNumeric > 0 && numericValue < currentNumeric) {
+          this._setActionState("reading", buttonEntityId, {
+            status: "error",
+            message: `Valoarea introdusă este mai mică decât indexul curent (${currentNumeric}).`,
+          });
+          this._render();
+          return;
+        }
+
+        const lastSent = this._getBackendReadingHistoryEntry(control);
+        if (lastSent) {
+          const lastTimestamp = new Date(lastSent.timestamp).getTime();
+          const ageMs = Date.now() - lastTimestamp;
+          if (String(lastSent.value) === String(value) && Number.isFinite(ageMs) && ageMs < 2 * 60 * 1000) {
+            this._setActionState("reading", buttonEntityId, {
+              status: "error",
+              message: "Aceeași valoare a fost trimisă foarte recent. Verifică înainte să retrimiți.",
+            });
+            this._render();
+            return;
+          }
+        }
+
         this._setActionState("reading", buttonEntityId, { status: "sending", message: "" });
         this._render();
 
         try {
           await this._hass.callService("number", "set_value", {
             entity_id: numberEntityId,
-            value: Number(value),
+            value: numericValue,
           });
 
           await this._hass.callService("button", "press", {
@@ -1740,6 +1853,12 @@ _buildProviderRefreshButton(provider) {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
         gap: 8px;
+      }
+
+      .reading-last-sent {
+        margin-top: 8px;
+        font-size: 0.82rem;
+        color: var(--secondary-text-color);
       }
 
       .inline-status {

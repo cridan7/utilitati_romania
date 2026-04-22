@@ -172,6 +172,91 @@ def _index_din_previous(previous_payload: dict[str, Any] | None) -> float | None
     return None
 
 
+def _extract_serial_numbers(payload: dict[str, Any] | None) -> list[str]:
+    rezultat: list[str] = []
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key.lower() in {'serialnumber', 'serialno', 'meterserialnumber', 'serial_number'}:
+                    text = str(value or '').strip()
+                    if text and text not in rezultat:
+                        rezultat.append(text)
+                else:
+                    _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(payload or {})
+    return rezultat
+
+
+def _extract_history_rows(payload: dict[str, Any] | None) -> list[dict[str, Any]]:
+    randuri: list[dict[str, Any]] = []
+
+    index_keys = (
+        'MRResult', 'mrResult', 'prevMRResult', 'Index', 'index', 'meterRead',
+        'meterread', 'readValue', 'ReadValue', 'newmeterread', 'NewMeterRead',
+        'CurrentRead', 'currentRead', 'readingValue', 'ReadingValue',
+    )
+    date_keys = (
+        'MRDate', 'mrDate', 'Date', 'date', 'readDate', 'ReadDate',
+        'meterReadDate', 'MeterReadDate', 'prevMRDate', 'createdOn', 'CreatedOn',
+    )
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, dict):
+            data_raw = None
+            for key in index_keys:
+                if key in node and node.get(key) not in (None, '', 'null'):
+                    data_raw = node.get(key)
+                    break
+            data_date = None
+            for key in date_keys:
+                if key in node and node.get(key):
+                    data_date = node.get(key)
+                    break
+            if data_raw is not None and data_date:
+                randuri.append(node)
+            for value in node.values():
+                _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+
+    _walk(payload or {})
+    return randuri
+
+
+def _index_din_istoric(history_payload: dict[str, Any] | None) -> float | None:
+    candidati: list[tuple[date, float]] = []
+    for row in _extract_history_rows(history_payload):
+        data_citire = None
+        for key in ('MRDate', 'mrDate', 'Date', 'date', 'readDate', 'ReadDate', 'meterReadDate', 'MeterReadDate', 'prevMRDate', 'createdOn', 'CreatedOn'):
+            data_citire = _parseaza_data(row.get(key))
+            if data_citire is not None:
+                break
+        if data_citire is None:
+            continue
+
+        valoare = None
+        for key in ('MRResult', 'mrResult', 'prevMRResult', 'Index', 'index', 'meterRead', 'meterread', 'readValue', 'ReadValue', 'newmeterread', 'NewMeterRead', 'CurrentRead', 'currentRead', 'readingValue', 'ReadingValue'):
+            valoare = _float_ro(row.get(key))
+            if valoare is not None:
+                break
+        if valoare is None:
+            continue
+
+        candidati.append((data_citire, valoare))
+
+    if not candidati:
+        return None
+
+    candidati.sort(key=lambda item: (item[0], item[1]))
+    return candidati[-1][1]
+
+
 def _construieste_factura_curenta_din_bill(
     bill: dict[str, Any] | None,
     *,
@@ -308,6 +393,19 @@ class ClientFurnizorHidroelectrica(ClientFurnizor):
             except Exception:
                 previous_payload = None
 
+            serial_numbers: list[str] = []
+            history_payload = None
+            if pod and instalare:
+                try:
+                    series_payload = await self.api.async_fetch_meter_counter_series(uan, instalare, pod)
+                    serial_numbers = _extract_serial_numbers(series_payload)
+                except Exception:
+                    serial_numbers = []
+                try:
+                    history_payload = await self.api.async_fetch_meter_read_history(uan, instalare, pod, serial_numbers)
+                except Exception:
+                    history_payload = None
+
             id_cont_unic = account_number or uan
 
             conturi.append(ContUtilitate(
@@ -320,7 +418,7 @@ class ClientFurnizorHidroelectrica(ClientFurnizor):
                 tip_utilitate='curent',
                 tip_serviciu='curent',
                 este_prosumator=False,
-                date_brute={**cont, 'account_number': account_number, 'contract_account_id': uan, 'pod': pod, 'instalare': instalare, 'window_data': window_data, 'previous_meter_read': previous_payload},
+                date_brute={**cont, 'account_number': account_number, 'contract_account_id': uan, 'pod': pod, 'instalare': instalare, 'window_data': window_data, 'previous_meter_read': previous_payload, 'meter_read_history': history_payload, 'meter_serial_numbers': serial_numbers},
             ))
 
             facturi_cont: list[FacturaUtilitate] = []
@@ -404,7 +502,9 @@ class ClientFurnizorHidroelectrica(ClientFurnizor):
                     else:
                         continue
                     break
-            index_curent = _index_din_previous(previous_payload)
+            index_curent = _index_din_istoric(history_payload)
+            if index_curent is None:
+                index_curent = _index_din_previous(previous_payload)
             if index_curent is not None:
                 consumuri.append(ConsumUtilitate(cheie='index_energie_electrica', valoare=round(index_curent, 3), unitate='kWh', id_cont=id_cont_unic, tip_utilitate='curent', tip_serviciu='curent'))
             consumuri.append(ConsumUtilitate(cheie='citire_permisa', valoare='Da' if _citire_permisa(window_data, previous_payload) else 'Nu', unitate=None, id_cont=id_cont_unic, tip_utilitate='curent', tip_serviciu='curent'))
