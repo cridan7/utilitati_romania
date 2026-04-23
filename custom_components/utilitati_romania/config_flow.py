@@ -29,6 +29,7 @@ from .const import (
     CONF_CONTRACT_ID,
     CONF_DATE_TOKEN_EON,
     CONF_DIGI_2FA_METHOD,
+    CONF_DIGI_2FA_TARGET,
     CONF_DIGI_COOKIES,
     CONF_DIGI_HISTORY_LIMIT,
     CONF_DIGI_SELECTED_ACCOUNT_ID,
@@ -573,6 +574,19 @@ class FluxConfigurareUtilitatiRomania(config_entries.ConfigFlow, domain=DOMENIU)
 
         return await self._finalizeaza_creare_intrare_digi()
 
+    def _construieste_optiuni_tinta_2fa_digi(self, method: str) -> list[dict[str, str]]:
+        if self._digi_two_factor is None:
+            return []
+        selected = self._digi_two_factor.methods.get(method) or {}
+        options = selected.get("target_options") or []
+        rezultate: list[dict[str, str]] = []
+        for option in options:
+            value = str(option.get("value") or "").strip()
+            label = str(option.get("label") or value).strip()
+            if value:
+                rezultate.append({"value": value, "label": label})
+        return rezultate
+
     async def async_step_digi_metoda_2fa(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
@@ -589,27 +603,50 @@ class FluxConfigurareUtilitatiRomania(config_entries.ConfigFlow, domain=DOMENIU)
 
         default_method = "sms" if "sms" in available else available[0]
 
+        current_method = default_method
         if user_input is not None:
-            method = str(user_input[CONF_DIGI_2FA_METHOD])
+            current_method = str(user_input[CONF_DIGI_2FA_METHOD])
+            selected_target = str(user_input.get(CONF_DIGI_2FA_TARGET, "") or "").strip()
             try:
-                await self._api_digi.send_2fa_code(self._digi_two_factor, method)
-                self._digi_pending[CONF_DIGI_2FA_METHOD] = method
+                await self._api_digi.send_2fa_code(
+                    self._digi_two_factor,
+                    current_method,
+                    selected_target or None,
+                )
+                self._digi_pending[CONF_DIGI_2FA_METHOD] = current_method
+                if selected_target:
+                    self._digi_pending[CONF_DIGI_2FA_TARGET] = selected_target
+                else:
+                    self._digi_pending.pop(CONF_DIGI_2FA_TARGET, None)
                 return await self.async_step_digi_cod_2fa()
             except DigiTwoFactorError:
                 erori["base"] = "digi_trimitere_cod_esuata"
 
+        target_options = self._construieste_optiuni_tinta_2fa_digi(current_method)
+        schema_data: dict[Any, Any] = {
+            vol.Required(CONF_DIGI_2FA_METHOD, default=current_method): SelectSelector(
+                SelectSelectorConfig(
+                    options=[{"value": value, "label": value.upper()} for value in available],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
+        }
+        if current_method == "sms" and len(target_options) > 1:
+            implicit_target = str(
+                (user_input or {}).get(CONF_DIGI_2FA_TARGET)
+                or self._digi_pending.get(CONF_DIGI_2FA_TARGET)
+                or target_options[0]["value"]
+            )
+            schema_data[vol.Required(CONF_DIGI_2FA_TARGET, default=implicit_target)] = SelectSelector(
+                SelectSelectorConfig(
+                    options=target_options,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
+
         return self.async_show_form(
             step_id="digi_metoda_2fa",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_DIGI_2FA_METHOD, default=default_method): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[{"value": value, "label": value.upper()} for value in available],
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
-                    )
-                }
-            ),
+            data_schema=vol.Schema(schema_data),
             errors=erori,
         )
 
@@ -941,27 +978,50 @@ class FluxConfigurareUtilitatiRomania(config_entries.ConfigFlow, domain=DOMENIU)
 
         default_method = "sms" if "sms" in available else available[0]
 
+        current_method = default_method
         if user_input is not None:
-            method = str(user_input[CONF_DIGI_2FA_METHOD])
+            current_method = str(user_input[CONF_DIGI_2FA_METHOD])
+            selected_target = str(user_input.get(CONF_DIGI_2FA_TARGET, "") or "").strip()
             try:
-                await self._api_digi.send_2fa_code(self._digi_two_factor, method)
-                self._digi_pending[CONF_DIGI_2FA_METHOD] = method
+                await self._api_digi.send_2fa_code(
+                    self._digi_two_factor,
+                    current_method,
+                    selected_target or None,
+                )
+                self._digi_pending[CONF_DIGI_2FA_METHOD] = current_method
+                if selected_target:
+                    self._digi_pending[CONF_DIGI_2FA_TARGET] = selected_target
+                else:
+                    self._digi_pending.pop(CONF_DIGI_2FA_TARGET, None)
                 return await self.async_step_digi_reauth_cod_2fa()
             except DigiTwoFactorError:
                 erori["base"] = "digi_trimitere_cod_esuata"
 
+        target_options = self._construieste_optiuni_tinta_2fa_digi(current_method)
+        schema_data: dict[Any, Any] = {
+            vol.Required(CONF_DIGI_2FA_METHOD, default=current_method): SelectSelector(
+                SelectSelectorConfig(
+                    options=[{"value": value, "label": value.upper()} for value in available],
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
+        }
+        if current_method == "sms" and len(target_options) > 1:
+            implicit_target = str(
+                (user_input or {}).get(CONF_DIGI_2FA_TARGET)
+                or self._digi_pending.get(CONF_DIGI_2FA_TARGET)
+                or target_options[0]["value"]
+            )
+            schema_data[vol.Required(CONF_DIGI_2FA_TARGET, default=implicit_target)] = SelectSelector(
+                SelectSelectorConfig(
+                    options=target_options,
+                    mode=SelectSelectorMode.DROPDOWN,
+                )
+            )
+
         return self.async_show_form(
             step_id="digi_reauth_metoda_2fa",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(CONF_DIGI_2FA_METHOD, default=default_method): SelectSelector(
-                        SelectSelectorConfig(
-                            options=[{"value": value, "label": value.upper()} for value in available],
-                            mode=SelectSelectorMode.DROPDOWN,
-                        )
-                    )
-                }
-            ),
+            data_schema=vol.Schema(schema_data),
             errors=erori,
         )
 

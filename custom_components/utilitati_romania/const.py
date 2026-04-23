@@ -58,6 +58,7 @@ CONF_DATE_TOKEN_EON = "date_token_eon"
 
 CONF_DIGI_COOKIES = "digi_cookies"
 CONF_DIGI_2FA_METHOD = "digi_2fa_method"
+CONF_DIGI_2FA_TARGET = "digi_2fa_target"
 CONF_DIGI_SELECTED_ACCOUNT_ID = "digi_selected_account_id"
 CONF_DIGI_SELECTED_ACCOUNT_LABEL = "digi_selected_account_label"
 CONF_DIGI_HISTORY_LIMIT = "digi_history_limit"

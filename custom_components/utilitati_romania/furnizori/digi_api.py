@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from html import unescape
 from typing import Any
@@ -78,6 +78,14 @@ RE_PHONE_PARAM = re.compile(
     r'(?:phone|form-phone-number-confirm|phone-number-confirm)[^a-f0-9]{0,40}([a-f0-9]{32})',
     re.I | re.S,
 )
+RE_SELECT_BLOCK = re.compile(
+    r'<select[^>]*(?:id|name)=["\']([^"\']+)["\'][^>]*>(.*?)</select>',
+    re.I | re.S,
+)
+RE_OPTION_TAG = re.compile(
+    r'<option[^>]*value=["\']([^"\']*)["\'][^>]*>(.*?)</option>',
+    re.I | re.S,
+)
 
 RE_LABEL_VALUE_MONEY = re.compile(
     r'>\s*(Total|Rest)\s*<.*?>\s*([0-9]+(?:(?:[.,]|&period;)[0-9]{2})?)\s*LEI',
@@ -114,9 +122,16 @@ class DigiReauthRequired(DigiError):
 
 
 @dataclass(slots=True)
+class TwoFactorOption:
+    value: str
+    label: str
+
+
+@dataclass(slots=True)
 class TwoFactorContext:
     methods: dict[str, dict[str, Any]]
     html: str
+    selections: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -257,6 +272,33 @@ class DigiApiClient:
                 hidden[name] = attrs.get("value", "")
         return hidden
 
+    def _extract_select_options(self, html: str, *candidate_names: str) -> list[TwoFactorOption]:
+        candidates = {name.lower() for name in candidate_names if name}
+        options: list[TwoFactorOption] = []
+
+        for select_name, select_body in RE_SELECT_BLOCK.findall(html):
+            name_l = select_name.lower()
+            if candidates and name_l not in candidates:
+                continue
+
+            for value, label_html in RE_OPTION_TAG.findall(select_body):
+                clean_value = (value or "").strip()
+                clean_label = self._clean_text(label_html)
+                if not clean_value or not clean_label:
+                    continue
+                options.append(TwoFactorOption(value=clean_value, label=clean_label))
+
+        deduped: list[TwoFactorOption] = []
+        seen: set[tuple[str, str]] = set()
+        for option in options:
+            key = (option.value, option.label)
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(option)
+
+        return deduped
+
     def _extract_radio_options(self, html: str) -> list[AddressOption]:
         labels = {key: self._clean_text(val) for key, val in RE_LABEL_FOR.findall(html)}
         options: list[AddressOption] = []
@@ -303,6 +345,14 @@ class DigiApiClient:
             if match:
                 phone_value = match.group(1)
 
+        sms_candidates = self._extract_select_options(
+            html,
+            "form-my-account-2fa-send-phone",
+            "phone",
+            "phone-number-confirm",
+            "form-phone-number-confirm",
+        )
+
         if not phone_value and (
             "trimite sms" in html_lower
             or "codul primit prin sms" in html_lower
@@ -313,18 +363,23 @@ class DigiApiClient:
             if len(tokens) == 1:
                 phone_value = tokens[0]
 
-        if phone_value:
-            methods["sms"] = {
+        if phone_value or sms_candidates:
+            sms_method: dict[str, Any] = {
                 "send_url": TWO_FA_SEND_URL,
                 "send_payload": {
                     "action": "myAccount2FASend",
-                    "phone": phone_value,
                 },
                 "validate_payload": {
                     "action": "myAccount2FAVerify",
-                    "phone": phone_value,
                 },
             }
+            if phone_value:
+                sms_method["default_target"] = phone_value
+            if sms_candidates:
+                sms_method["target_options"] = [
+                    {"value": option.value, "label": option.label} for option in sms_candidates
+                ]
+            methods["sms"] = sms_method
         elif (
             "trimite sms" in html_lower
             or "codul primit prin sms" in html_lower
@@ -332,7 +387,7 @@ class DigiApiClient:
             or "cod de siguranta prin sms" in html_lower
         ):
             _LOGGER.debug(
-                "Digi 2FA page looks like SMS flow but hidden phone token was not found. Hidden keys: %s",
+                "Digi 2FA page looks like SMS flow but phone target was not found. Hidden keys: %s",
                 list(hidden.keys()),
             )
 
@@ -363,15 +418,50 @@ class DigiApiClient:
 
         return methods
 
-    async def send_2fa_code(self, context: TwoFactorContext, method: str) -> None:
+    async def send_2fa_code(
+        self,
+        context: TwoFactorContext,
+        method: str,
+        target_value: str | None = None,
+    ) -> None:
         selected = context.methods.get(method)
         if not selected:
             raise DigiTwoFactorError(f"2FA method '{method}' is not available")
 
+        payload = dict(selected["send_payload"])
+
+        target_key: str | None = None
+        target_options = selected.get("target_options") or []
+        default_target = selected.get("default_target")
+
+        if method == "sms" and (target_options or default_target):
+            target_key = "phone"
+
+        if target_key:
+            resolved_target = (target_value or default_target or "").strip()
+            if target_options and not resolved_target:
+                if len(target_options) == 1:
+                    resolved_target = str(target_options[0].get("value") or "").strip()
+                else:
+                    raise DigiTwoFactorError("2FA target selection is required")
+
+            if target_options:
+                allowed_values = {str(option.get("value") or "").strip() for option in target_options}
+                if resolved_target not in allowed_values:
+                    raise DigiTwoFactorError("Invalid 2FA target selected")
+
+            if not resolved_target:
+                raise DigiTwoFactorError("2FA target could not be determined")
+
+            payload[target_key] = resolved_target
+            context.selections[method] = resolved_target
+        elif target_value:
+            raise DigiTwoFactorError("Selected 2FA target is not supported for this method")
+
         resp = await self._request(
             "POST",
             selected["send_url"],
-            data=selected["send_payload"],
+            data=payload,
             allow_redirects=True,
             headers={"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"},
         )
@@ -389,6 +479,9 @@ class DigiApiClient:
             raise DigiTwoFactorError(f"2FA method '{method}' is not available")
 
         payload = dict(selected["validate_payload"])
+        chosen_target = context.selections.get(method) or selected.get("default_target")
+        if method == "sms" and chosen_target:
+            payload["phone"] = chosen_target
         payload["code"] = code.strip()
 
         resp = await self._request(

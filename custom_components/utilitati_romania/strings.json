@@ -34,7 +34,8 @@
       "digi_metoda_2fa": {
         "title": "Metodă verificare Digi",
         "data": {
-          "digi_2fa_method": "Metodă 2FA"
+          "digi_2fa_method": "Metodă 2FA",
+          "digi_2fa_target": "Număr pentru SMS"
         }
       },
       "digi_cod_2fa": {
@@ -52,7 +53,8 @@
       "digi_reauth_metoda_2fa": {
         "title": "Metodă verificare Digi",
         "data": {
-          "digi_2fa_method": "Metodă 2FA"
+          "digi_2fa_method": "Metodă 2FA",
+          "digi_2fa_target": "Număr pentru SMS"
         }
       },
       "digi_reauth_cod_2fa": {
