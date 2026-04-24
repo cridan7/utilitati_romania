@@ -21,7 +21,6 @@ from .const import DOMENIU, CONF_FURNIZOR, FURNIZOR_ADMIN_GLOBAL
 from .modele import FacturaUtilitate, InstantaneuFurnizor
 from .hidro_device import alias_loc_consum, info_device_hidro, slug_loc_consum
 from .eon_device import alias_loc_eon, info_device_eon, slug_loc_eon
-from .ebloc_device import alias_apartament_ebloc, info_device_ebloc, info_device_ebloc_apartament, slug_apartament_ebloc
 from .myelectrica_device import alias_loc_myelectrica, info_device_myelectrica, slug_loc_myelectrica
 from .deer_device import alias_loc_deer, info_device_deer, slug_loc_deer
 from .naming import build_provider_slug, extract_street_slug, build_location_alias
