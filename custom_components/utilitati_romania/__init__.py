@@ -35,7 +35,6 @@ from .deer_device import alias_loc_deer, slug_loc_deer
 from .eon_device import alias_loc_eon, slug_loc_eon
 from .hidro_device import alias_loc_consum, slug_loc_consum
 from .myelectrica_device import alias_loc_myelectrica, slug_loc_myelectrica
-# from .ebloc_device import alias_apartament_ebloc, slug_apartament_ebloc
 from .naming import build_provider_slug, extract_street_slug
 
 _LOGGER = logging.getLogger(__name__)
@@ -294,13 +293,6 @@ def _provider_open_target(provider: str | None) -> dict[str, str] | None:
             "mode": "launch_app",
             "package_name": "com.sew.hidroelectrica",
             "fallback": "https://client.hidroelectrica.ro/",
-        }
-
-    if key == "ebloc":
-        return {
-            "mode": "launch_app",
-            "package_name": "com.xisoft.ebloc.ro",
-            "fallback": "https://www.e-bloc.ro/",
         }
 
     if key == "nova":
@@ -824,27 +816,6 @@ def _migrare_senzori_apa_canal(entry, data) -> dict[str, tuple[str, str]]:
     return mapping
 
 
-def _migrare_senzori_ebloc(entry_id: str, data) -> dict[str, tuple[str, str]]:
-    from .sensor import SENZORI_CONT_EBLOC
-
-    mapping: dict[str, tuple[str, str]] = {}
-    for cont in data.conturi:
-        slug_nou = slug_apartament_ebloc(cont)
-        alias_vechi = alias_apartament_ebloc(cont)
-        old_slugs = {
-            _slug_legacy(alias_vechi),
-            _slug_legacy(f"{getattr(cont, 'id_cont', '')}_{alias_vechi}"),
-            f"ebloc_{_slug_legacy(alias_vechi)}",
-        }
-        for descriere in SENZORI_CONT_EBLOC:
-            new_unique = f"{entry_id}_ebloc_{slug_nou}_{descriere.key}"
-            new_object_id = f"ebloc_{slug_nou}_{descriere.key}"
-            mapping[new_unique] = (new_unique, new_object_id)
-            for old_slug in old_slugs:
-                mapping[f"{entry_id}_ebloc_{old_slug}_{descriere.key}"] = (new_unique, new_object_id)
-    return mapping
-
-
 def _migrare_senzori_nova(entry_id: str, data) -> dict[str, tuple[str, str]]:
     from .sensor import SENZORI_REZUMAT, SENZORI_REZUMAT_FINANCIAR
 
@@ -884,7 +855,7 @@ async def _migrare_unique_ids(
     elif furnizor == "apa_canal":
         mapping = _migrare_senzori_apa_canal(entry, data)
     elif furnizor == "ebloc":
-        mapping = _migrare_senzori_ebloc(entry.entry_id, data)
+        return
     elif furnizor == "nova":
         mapping = _migrare_senzori_nova(entry.entry_id, data)
     else:
