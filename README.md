@@ -130,3 +130,17 @@ https://buymeacoffee.com/mariusonitiu
 ## ⚠️ Disclaimer
 
 Integrare neoficială.
+
+## Atribuire și componente derivate
+
+Această integrare este un proiect unificat și refactorizat pentru Home Assistant, dezvoltat pentru a grupa mai mulți furnizori de utilități din România într-o singură integrare.
+
+Anumite componente, în special logica de comunicare API pentru unii furnizori, sunt derivate sau inspirate din proiecte open-source publicate de cnecrea sub licență MIT:
+
+- https://github.com/cnecrea/eonromania
+- https://github.com/cnecrea/hidroelectrica
+- https://github.com/cnecrea/myelectrica
+
+Codul derivat din aceste proiecte este utilizat cu respectarea licenței MIT, inclusiv păstrarea notificării de copyright originale.
+
+Restul integrării, inclusiv structura unificată, agregarea facturilor, interfața de administrare, logica de licențiere, cardul Lovelace și adaptările specifice proiectului Utilități România, reprezintă contribuții proprii ale proiectului.
