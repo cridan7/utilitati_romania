@@ -854,8 +854,6 @@ async def _migrare_unique_ids(
         mapping = _migrare_senzori_deer(entry.entry_id, data)
     elif furnizor == "apa_canal":
         mapping = _migrare_senzori_apa_canal(entry, data)
-    elif furnizor == "ebloc":
-        return
     elif furnizor == "nova":
         mapping = _migrare_senzori_nova(entry.entry_id, data)
     else:
