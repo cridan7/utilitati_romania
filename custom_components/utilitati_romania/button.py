@@ -19,7 +19,6 @@ from .const import DOMENIU, CONF_FURNIZOR, FURNIZOR_ADMIN_GLOBAL, SERVICIU_RELOA
 from .licentiere import async_obtine_context_licenta, async_salveaza_licenta_globala, async_valideaza_licenta
 from .hidro_device import alias_loc_consum, info_device_hidro, slug_loc_consum
 from .eon_device import alias_loc_eon, info_device_eon, slug_loc_eon
-from .ebloc_device import info_device_ebloc, info_device_ebloc_apartament, slug_apartament_ebloc
 from .furnizori.hidroelectrica_helper import build_usage_entity, safe_get
 from .myelectrica_device import alias_loc_myelectrica, info_device_myelectrica, slug_loc_myelectrica
 
@@ -78,14 +77,6 @@ async def async_setup_entry(
             are_contor = bool(contoare and (contoare[0].get("SerieContor") or ((contoare[0].get("to_Cadran") or [{}])[0].get("RegisterCode"))))
             if are_contor:
                 entitati.append(ButonTrimiteIndexMyElectrica(coordonator, cont))
-    elif coordonator.data and coordonator.data.furnizor == "ebloc":
-        for cont in coordonator.data.conturi:
-            raw = getattr(cont, "date_brute", None) or {}
-            if raw.get("right_edit_nr_pers"):
-                entitati.append(ButonTrimiteNumarPersoaneEbloc(coordonator, cont))
-            for contor in raw.get("contoare", []) or []:
-                if contor.get("drept_editare"):
-                    entitati.append(ButonTrimiteIndexEbloc(coordonator, cont, contor))
     async_add_entities(entitati)
 
 
@@ -192,9 +183,7 @@ class ButonActualizareAcum(EntitateUtilitatiRomania, ButtonEntity):
         self._attr_unique_id = f"{coordonator.intrare.entry_id}_actualizare_acum"
         self._attr_name = "Actualizează acum"
         self._attr_icon = "mdi:refresh"
-        if getattr(coordonator.data, "furnizor", None) == "ebloc":
-            self._attr_device_info = info_device_ebloc(coordonator.intrare.entry_id)
-
+    
     async def async_press(self) -> None:
         await self.coordinator.async_request_refresh()
 
@@ -382,100 +371,6 @@ class ButonTrimiteIndexEon(EntitateUtilitatiRomania, ButtonEntity):
                 notification_id=notif_id,
             )
             raise
-
-
-class _ButonEblocBaza(EntitateUtilitatiRomania, ButtonEntity):
-    def __init__(self, coordonator: CoordonatorUtilitatiRomania, cont) -> None:
-        super().__init__(coordonator)
-        self.cont = cont
-        self._attr_device_info = info_device_ebloc_apartament(coordonator.intrare.entry_id, cont)
-
-    def _gaseste_entity_id_number(self, unique_id: str) -> str | None:
-        registry = er.async_get(self.hass)
-        return registry.async_get_entity_id("number", DOMENIU, unique_id)
-
-
-class ButonTrimiteNumarPersoaneEbloc(_ButonEblocBaza):
-    def __init__(self, coordonator: CoordonatorUtilitatiRomania, cont) -> None:
-        super().__init__(coordonator, cont)
-        slug = slug_apartament_ebloc(cont)
-        self._attr_unique_id = f"{coordonator.intrare.entry_id}_ebloc_{slug}_trimite_nr_persoane"
-        self._attr_name = "Trimite număr persoane"
-        self._attr_icon = "mdi:account-check"
-        self._number_uid = f"{coordonator.intrare.entry_id}_ebloc_{slug}_nr_persoane_de_trimis"
-
-    async def async_press(self) -> None:
-        entity_id = self._gaseste_entity_id_number(self._number_uid)
-        if not entity_id:
-            _LOGGER.warning("[eBloc] Nu găsesc selectorul pentru număr persoane: %s", self._number_uid)
-            return
-        state = self.hass.states.get(entity_id)
-        if state is None or state.state in ("unknown", "unavailable"):
-            _LOGGER.warning("[eBloc] Selector nr. persoane indisponibil: %s", entity_id)
-            return
-        try:
-            nr_pers = int(float(state.state))
-        except Exception:
-            _LOGGER.warning("[eBloc] Valoare invalidă nr. persoane: %s", state.state)
-            return
-        raw = getattr(self.cont, "date_brute", None) or {}
-        luna = str((self.coordinator.data.extra.get("luna") if self.coordinator.data else "") or datetime.now().strftime("%Y-%m"))
-        luna_curenta = datetime.now().strftime("%Y-%m")
-        if luna < luna_curenta:
-            luna = luna_curenta
-        _LOGGER.info("[eBloc] Trimit nr. persoane: asoc=%s ap=%s luna=%s nr=%s", raw.get("id_asoc"), raw.get("id_ap"), luna, nr_pers)
-        rezultat = await self.coordinator.client.api.async_set_nr_persoane(raw.get("id_asoc"), raw.get("id_ap"), luna, nr_pers)
-        _LOGGER.info("[eBloc] Răspuns nr. persoane: %s", rezultat)
-        if rezultat.get("result") == "ok":
-            await self.coordinator.async_request_refresh()
-
-
-class ButonTrimiteIndexEbloc(_ButonEblocBaza):
-    def __init__(self, coordonator: CoordonatorUtilitatiRomania, cont, contor: dict) -> None:
-        super().__init__(coordonator, cont)
-        self.contor = contor
-        slug = slug_apartament_ebloc(cont)
-        self._attr_unique_id = f"{coordonator.intrare.entry_id}_ebloc_{slug}_trimite_index_{contor['slug']}"
-        self._attr_name = f"Trimite index {contor['titlu']}"
-        self._attr_icon = "mdi:upload"
-        self._number_uid = f"{coordonator.intrare.entry_id}_ebloc_{slug}_index_{contor['slug']}_de_trimis"
-
-    async def async_press(self) -> None:
-        raw = getattr(self.cont, "date_brute", None) or {}
-        home = raw.get("home") or {}
-        start = str(home.get("indecsi_start") or "")
-        end = str(home.get("indecsi_end") or "")
-        if start and end:
-            today = datetime.now().date().isoformat()
-            if today < start[:10] or today > end[:10]:
-                _LOGGER.info("[eBloc] Perioada de citire este închisă pentru asoc=%s ap=%s (%s - %s)", raw.get("id_asoc"), raw.get("id_ap"), start, end)
-                return
-        entity_id = self._gaseste_entity_id_number(self._number_uid)
-        if not entity_id:
-            _LOGGER.warning("[eBloc] Nu găsesc selectorul pentru index: %s", self._number_uid)
-            return
-        state = self.hass.states.get(entity_id)
-        if state is None or state.state in ("unknown", "unavailable"):
-            _LOGGER.warning("[eBloc] Selector index indisponibil: %s", entity_id)
-            return
-        try:
-            valoare = float(state.state)
-        except Exception:
-            _LOGGER.warning("[eBloc] Valoare invalidă index: %s", state.state)
-            return
-        index_api = int(round(valoare * 1000))
-        _LOGGER.info("[eBloc] Trimit index: asoc=%s ap=%s contor=%s valoare=%s api=%s", raw.get("id_asoc"), raw.get("id_ap"), self.contor.get("id_contor"), valoare, index_api)
-        rezultat = await self.coordinator.client.api.async_set_index_contoare([
-            {
-                "id_asoc": raw.get("id_asoc"),
-                "id_ap": raw.get("id_ap"),
-                "id_contor": int(self.contor["id_contor"]),
-                "index_nou": index_api,
-            }
-        ])
-        _LOGGER.info("[eBloc] Răspuns trimitere index: %s", rezultat)
-        if rezultat.get("result") == "ok":
-            await self.coordinator.async_request_refresh()
 
 
 class ButonTrimiteIndexMyElectrica(EntitateUtilitatiRomania, ButtonEntity):
