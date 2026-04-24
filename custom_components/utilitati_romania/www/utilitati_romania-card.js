@@ -289,7 +289,7 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
     const terms = this._readingTerms(location, provider);
     const normalizedProvider = providerKey.replace(/_/g, " ");
 
-    if (!providerKey || !["hidroelectrica", "eon", "myelectrica", "ebloc"].includes(providerKey)) {
+    if (!providerKey || !["hidroelectrica", "eon", "myelectrica"].includes(providerKey)) {
       return null;
     }
 
@@ -485,32 +485,6 @@ class UtilitatiRomaniaFacturiCard extends HTMLElement {
           currentEntityId: currentEntity?.entity_id || null,
         });
       }
-      return controls;
-    }
-
-    if (providerKey === "ebloc") {
-      const base = sensorObject.replace(/_citire_permisa$/, "");
-      const numberEntities = Object.values(states).filter((stateObj) => stateObj.entity_id.startsWith(`number.${base}_index_`) && stateObj.entity_id.endsWith("_de_trimis"));
-      const buttonEntities = Object.values(states).filter((stateObj) => stateObj.entity_id.startsWith("button."));
-      numberEntities.forEach((numberEntity, index) => {
-        const friendly = String(numberEntity.attributes?.friendly_name || "Index");
-        const meterLabel = friendly.replace(/^index\s+/i, "").replace(/\s+de trimis$/i, "").trim() || `Contor ${index + 1}`;
-        const meterLabelNorm = this._normalizeText(meterLabel);
-        const buttonEntity = buttonEntities.find((candidate) => {
-          const text = this._entityFriendlyText(candidate);
-          return text.includes("trimite index") && text.includes(meterLabelNorm);
-        });
-        const currentEntity = Object.values(states).find((stateObj) => stateObj.entity_id.startsWith(`sensor.${base}_index_`) && this._entityFriendlyText(stateObj).includes(meterLabelNorm));
-        if (buttonEntity) {
-          controls.push({
-            key: `${providerKey}_${provider.id_cont || base}_${meterLabelNorm}`,
-            label: meterLabel,
-            numberEntityId: numberEntity.entity_id,
-            buttonEntityId: buttonEntity.entity_id,
-            currentEntityId: currentEntity?.entity_id || null,
-          });
-        }
-      });
       return controls;
     }
 
@@ -867,7 +841,6 @@ _buildProviderRefreshButton(provider) {
     const labels = {
       digi: "App. Digi",
       eon: "App. E.ON",
-      ebloc: "App. eBloc",
       hidroelectrica: "App. Hidroelectrica",
       nova: "App. Nova",
     };
