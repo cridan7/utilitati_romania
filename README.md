@@ -60,7 +60,6 @@ Statusul este salvat local și se reflectă imediat în interfață.
 - Digi
 - Nova
 - Apă Canal Sibiu
-- eBloc
 
 👉 Lista este în continuă extindere. Vor fi adăugați și alți furnizori.
 
