@@ -3,7 +3,6 @@ from __future__ import annotations
 from .apa_canal import ClientFurnizorApaCanal
 from .baza import ClientFurnizor
 from .digi import ClientFurnizorDigi
-from .ebloc import ClientFurnizorEbloc
 from .eon import ClientFurnizorEon
 from .hidroelectrica import ClientFurnizorHidroelectrica
 from .myelectrica import ClientFurnizorMyElectrica
@@ -14,7 +13,6 @@ FURNIZORI: dict[str, type[ClientFurnizor]] = {
     ClientFurnizorNova.cheie_furnizor: ClientFurnizorNova,
     ClientFurnizorDigi.cheie_furnizor: ClientFurnizorDigi,
     ClientFurnizorEon.cheie_furnizor: ClientFurnizorEon,
-    ClientFurnizorEbloc.cheie_furnizor: ClientFurnizorEbloc,
     ClientFurnizorApaCanal.cheie_furnizor: ClientFurnizorApaCanal,
     ClientFurnizorHidroelectrica.cheie_furnizor: ClientFurnizorHidroelectrica,
     ClientFurnizorMyElectrica.cheie_furnizor: ClientFurnizorMyElectrica,
