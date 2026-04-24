@@ -10,7 +10,6 @@ from .const import DOMENIU
 from .entitate import EntitateUtilitatiRomania
 from .hidro_device import alias_loc_consum, info_device_hidro, slug_loc_consum
 from .eon_device import alias_loc_eon, info_device_eon, slug_loc_eon
-from .ebloc_device import info_device_ebloc_apartament, slug_apartament_ebloc
 from .myelectrica_device import alias_loc_myelectrica, info_device_myelectrica, slug_loc_myelectrica
 
 
@@ -61,15 +60,6 @@ async def async_setup_entry(
                 )
                 if are_contor:
                     entitati.append(NumarIndexMyElectrica(coordonator, cont))
-
-        elif coordonator.data.furnizor == "ebloc":
-            for cont in coordonator.data.conturi:
-                raw = getattr(cont, "date_brute", None) or {}
-                if raw.get("right_edit_nr_pers"):
-                    entitati.append(NumarPersoaneEbloc(coordonator, cont))
-                for contor in raw.get("contoare", []) or []:
-                    if contor.get("drept_editare"):
-                        entitati.append(NumarIndexEbloc(coordonator, cont, contor))
 
     async_add_entities(entitati)
 
@@ -175,70 +165,6 @@ class NumarIndexMyElectrica(EntitateUtilitatiRomania, RestoreNumber):
         self._attr_suggested_object_id = f"utilitati_romania_myelectrica_{slug}_index_contor"
         self.entity_id = f"number.utilitati_romania_myelectrica_{slug}_index_contor"
         self._attr_native_value = 0
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        ultima_stare = await self.async_get_last_number_data()
-        if ultima_stare and ultima_stare.native_value is not None:
-            self._attr_native_value = ultima_stare.native_value
-
-    async def async_set_native_value(self, value: float) -> None:
-        self._attr_native_value = value
-        self.async_write_ha_state()
-
-
-class NumarPersoaneEbloc(EntitateUtilitatiRomania, RestoreNumber):
-    _attr_native_min_value = 0
-    _attr_native_max_value = 50
-    _attr_native_step = 1
-    _attr_icon = "mdi:account-group"
-    _attr_mode = "box"
-
-    def __init__(self, coordonator: CoordonatorUtilitatiRomania, cont) -> None:
-        super().__init__(coordonator)
-        self.cont = cont
-        slug = slug_apartament_ebloc(cont)
-        self._attr_unique_id = (
-            f"{coordonator.intrare.entry_id}_ebloc_{slug}_nr_persoane_de_trimis"
-        )
-        self._attr_name = "Număr persoane de trimis"
-        self._attr_device_info = info_device_ebloc_apartament(coordonator.intrare.entry_id, cont)
-        self._attr_suggested_object_id = f"ebloc_{slug}_nr_persoane_de_trimis"
-        self.entity_id = f"number.ebloc_{slug}_nr_persoane_de_trimis"
-        self._attr_native_value = 0
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        ultima_stare = await self.async_get_last_number_data()
-        if ultima_stare and ultima_stare.native_value is not None:
-            self._attr_native_value = ultima_stare.native_value
-
-    async def async_set_native_value(self, value: float) -> None:
-        self._attr_native_value = int(value)
-        self.async_write_ha_state()
-
-
-class NumarIndexEbloc(EntitateUtilitatiRomania, RestoreNumber):
-    _attr_native_min_value = 0
-    _attr_native_max_value = 99999999
-    _attr_native_step = 0.001
-    _attr_icon = "mdi:counter"
-    _attr_mode = "box"
-    _attr_native_unit_of_measurement = "m³"
-
-    def __init__(self, coordonator: CoordonatorUtilitatiRomania, cont, contor: dict) -> None:
-        super().__init__(coordonator)
-        self.cont = cont
-        self.contor = contor
-        slug = slug_apartament_ebloc(cont)
-        self._attr_unique_id = (
-            f"{coordonator.intrare.entry_id}_ebloc_{slug}_index_{contor['slug']}_de_trimis"
-        )
-        self._attr_name = f"Index {contor['titlu']} de trimis"
-        self._attr_device_info = info_device_ebloc_apartament(coordonator.intrare.entry_id, cont)
-        self._attr_suggested_object_id = f"ebloc_{slug}_index_{contor['slug']}_de_trimis"
-        self.entity_id = f"number.ebloc_{slug}_index_{contor['slug']}_de_trimis"
-        self._attr_native_value = 0.0
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
