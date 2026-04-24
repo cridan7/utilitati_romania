@@ -35,7 +35,7 @@ from .deer_device import alias_loc_deer, slug_loc_deer
 from .eon_device import alias_loc_eon, slug_loc_eon
 from .hidro_device import alias_loc_consum, slug_loc_consum
 from .myelectrica_device import alias_loc_myelectrica, slug_loc_myelectrica
-#from .ebloc_device import alias_apartament_ebloc, slug_apartament_ebloc
+# from .ebloc_device import alias_apartament_ebloc, slug_apartament_ebloc
 from .naming import build_provider_slug, extract_street_slug
 
 _LOGGER = logging.getLogger(__name__)
