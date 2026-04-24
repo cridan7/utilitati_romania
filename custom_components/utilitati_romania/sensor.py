@@ -12,7 +12,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.const import UnitOfVolume
 
 from .coordonator import CoordonatorUtilitatiRomania
@@ -23,10 +22,9 @@ from .hidro_device import alias_loc_consum, info_device_hidro, slug_loc_consum
 from .eon_device import alias_loc_eon, info_device_eon, slug_loc_eon
 from .myelectrica_device import alias_loc_myelectrica, info_device_myelectrica, slug_loc_myelectrica
 from .deer_device import alias_loc_deer, info_device_deer, slug_loc_deer
-from .naming import build_provider_slug, extract_street_slug, build_location_alias
+from .naming import build_provider_slug, extract_street_slug
 from .licentiere import async_obtine_licenta_globala, mascheaza_cheia_licenta
 from .facturi_agregate import colecteaza_facturi_agregate, sumar_facturi
-from .const import DOMENIU, CONF_FURNIZOR, FURNIZOR_ADMIN_GLOBAL
 from .storage_citiri import async_incarca_cache_citiri, obtine_citire_cache
 
 def _cont_curent_dupa_id(coordonator: CoordonatorUtilitatiRomania, id_cont: str | None):
@@ -744,38 +742,6 @@ SENZORI_CONT_DIGI: tuple[DescriereSenzorContDigi, ...] = (
 )
 
 
-@dataclass(frozen=True, kw_only=True)
-class DescriereSenzorContEbloc(SensorEntityDescription):
-    functie_valoare: Any
-
-
-SENZORI_REZUMAT_EBLOC: tuple[DescriereSenzorRezumat, ...] = (
-    DescriereSenzorRezumat(key="numar_apartamente", name="Număr apartamente", icon="mdi:home-city-outline", functie_valoare=lambda i: _valoare_consum(i, "numar_apartamente")),
-    DescriereSenzorRezumat(key="numar_asociatii", name="Număr asociații", icon="mdi:office-building", functie_valoare=lambda i: _valoare_consum(i, "numar_asociatii")),
-    DescriereSenzorRezumat(key="numar_tichete", name="Număr tichete", icon="mdi:ticket-account", functie_valoare=lambda i: _valoare_consum(i, "numar_tichete")),
-    DescriereSenzorRezumat(key="de_plata", name="De plată", icon="mdi:cash-clock", native_unit_of_measurement="RON", functie_valoare=lambda i: _valoare_consum(i, "de_plata")),
-    DescriereSenzorRezumat(key="total_neachitat", name="Total neachitat", icon="mdi:cash-remove", native_unit_of_measurement="RON", functie_valoare=lambda i: _valoare_consum(i, "total_neachitat")),
-    DescriereSenzorRezumat(key="sold_curent", name="Sold curent", icon="mdi:cash", native_unit_of_measurement="RON", functie_valoare=lambda i: _valoare_consum(i, "sold_curent")),
-    DescriereSenzorRezumat(key="sold_wallet", name="Sold wallet", icon="mdi:wallet", native_unit_of_measurement="RON", functie_valoare=lambda i: _valoare_consum(i, "sold_wallet")),
-    DescriereSenzorRezumat(key="urmatoarea_scadenta", name="Următoarea scadență", icon="mdi:calendar-clock", functie_valoare=lambda i: _valoare_consum(i, "urmatoarea_scadenta")),
-)
-
-SENZORI_CONT_EBLOC: tuple[DescriereSenzorContEbloc, ...] = (
-    DescriereSenzorContEbloc(key="asociatie", name="Asociație", icon="mdi:office-building", functie_valoare=lambda i, c: _valoare_consum(i, "asociatie", c.id_cont)),
-    DescriereSenzorContEbloc(key="citire_permisa", name="Citire permisă", icon="mdi:calendar-check", functie_valoare=lambda i, c: _valoare_consum(i, "citire_permisa", c.id_cont)),
-    DescriereSenzorContEbloc(key="data_ultima_plata", name="Data ultimei plăți", icon="mdi:calendar-check", functie_valoare=lambda i, c: _valoare_consum(i, "data_ultima_plata", c.id_cont)),
-    DescriereSenzorContEbloc(key="de_plata", name="De plată", icon="mdi:cash-clock", native_unit_of_measurement="RON", functie_valoare=lambda i, c: _valoare_consum(i, "de_plata", c.id_cont)),
-    DescriereSenzorContEbloc(key="factura_restanta", name="Factură restantă", icon="mdi:alert-circle", functie_valoare=lambda i, c: _valoare_consum(i, "factura_restanta", c.id_cont)),
-    DescriereSenzorContEbloc(key="arhiva_plati", name="Arhivă plăți", icon="mdi:credit-card-check", functie_valoare=lambda i, c: _valoare_consum(i, "arhiva_plati", c.id_cont)),
-    DescriereSenzorContEbloc(key="numar_persoane", name="Număr persoane", icon="mdi:account-group", functie_valoare=lambda i, c: _valoare_consum(i, "numar_persoane", c.id_cont)),
-    DescriereSenzorContEbloc(key="numar_tichete", name="Tichete", icon="mdi:ticket-account", functie_valoare=lambda i, c: _valoare_consum(i, "numar_tichete", c.id_cont)),
-    DescriereSenzorContEbloc(key="sold_wallet", name="Sold wallet", icon="mdi:wallet", native_unit_of_measurement="RON", functie_valoare=lambda i, c: _valoare_consum(i, "sold_wallet", c.id_cont)),
-    DescriereSenzorContEbloc(key="sold_curent", name="Sold curent", icon="mdi:cash", native_unit_of_measurement="RON", functie_valoare=lambda i, c: _valoare_consum(i, "sold_curent", c.id_cont)),
-    DescriereSenzorContEbloc(key="urmatoarea_scadenta", name="Următoarea scadență", icon="mdi:calendar-clock", functie_valoare=lambda i, c: _valoare_consum(i, "urmatoarea_scadenta", c.id_cont)),
-    DescriereSenzorContEbloc(key="valoare_ultima_plata", name="Valoare ultima plată", icon="mdi:cash-check", native_unit_of_measurement="RON", functie_valoare=lambda i, c: _valoare_consum(i, "valoare_ultima_plata", c.id_cont)),
-)
-
-
 SENZORI_CONT_MYELECTRICA: tuple[DescriereSenzorCont, ...] = (
     DescriereSenzorCont(key="date_client", name="Date client", icon="mdi:account-circle", functie_valoare=lambda i, c: c.nume),
     DescriereSenzorCont(key="date_contract", name="Date contract", icon="mdi:file-document-outline", functie_valoare=lambda i, c: c.stare),
@@ -883,19 +849,6 @@ async def async_setup_entry(
             for descriere in SENZORI_CONT_DIGI:
                 entitati.append(SenzorContDigi(coordonator, cont, descriere))
 
-    elif instantaneu and instantaneu.furnizor == "ebloc":
-        entitati.extend(SenzorRezumatEbloc(coordonator, d) for d in SENZORI_REZUMAT_EBLOC)
-        for cont in instantaneu.conturi:
-            for descriere in SENZORI_CONT_EBLOC:
-                valoare = descriere.functie_valoare(instantaneu, cont)
-                if descriere.key in {"data_ultima_plata", "valoare_ultima_plata"} and valoare in (None, "", "unknown", "Unknown"):
-                    continue
-                entitati.append(SenzorContEbloc(coordonator, cont, descriere))
-            raw = getattr(cont, "date_brute", None) or {}
-            for contor in raw.get("contoare", []) or []:
-                if contor.get("index_actual") is None:
-                    continue
-                entitati.append(SenzorContorEbloc(coordonator, cont, contor))
 
     elif instantaneu and instantaneu.furnizor == "myelectrica":
         entitati.extend(SenzorRezumat(coordonator, d) for d in (list(SENZORI_REZUMAT) + list(SENZORI_REZUMAT_FINANCIAR)))
@@ -1450,198 +1403,3 @@ class SenzorApaCanal(EntitateUtilitatiRomania, SensorEntity):
 
         return None
 
-
-class SenzorRezumatEbloc(EntitateUtilitatiRomania, SensorEntity):
-    entity_description: DescriereSenzorRezumat
-
-    def __init__(self, coordonator: CoordonatorUtilitatiRomania, descriere: DescriereSenzorRezumat) -> None:
-        super().__init__(coordonator)
-        self.entity_description = descriere
-        self._attr_unique_id = f"{coordonator.intrare.entry_id}_ebloc_{descriere.key}"
-        self._attr_device_info = info_device_ebloc(coordonator.intrare.entry_id)
-
-    @property
-    def native_value(self):
-        return None if self.coordinator.data is None else self.entity_description.functie_valoare(self.coordinator.data)
-
-
-class SenzorContEbloc(EntitateUtilitatiRomania, SensorEntity):
-    entity_description: DescriereSenzorContEbloc
-
-    def __init__(self, coordonator: CoordonatorUtilitatiRomania, cont, descriere: DescriereSenzorContEbloc) -> None:
-        super().__init__(coordonator)
-        self.cont = cont
-        self.entity_description = descriere
-        slug = slug_apartament_ebloc(cont)
-        self._attr_unique_id = f"{coordonator.intrare.entry_id}_ebloc_{slug}_{descriere.key}"
-        self._attr_name = descriere.name
-        self._attr_suggested_object_id = f"ebloc_{slug}_{descriere.key}"
-        self._attr_device_info = info_device_ebloc_apartament(coordonator.intrare.entry_id, cont)
-
-    @property
-    def available(self):
-        if self.coordinator.data is None:
-            return False
-        return any(getattr(cont, "id_cont", None) == getattr(self.cont, "id_cont", None) for cont in self.coordinator.data.conturi)
-
-    @property
-    def native_value(self):
-        return None if self.coordinator.data is None else self.entity_description.functie_valoare(self.coordinator.data, self.cont)
-
-    @property
-    def extra_state_attributes(self):
-        raw = getattr(self.cont, 'date_brute', None) or {}
-        attrs = {
-            'id_asoc': raw.get('id_asoc'),
-            'id_ap': raw.get('id_ap'),
-            'apartament': raw.get('apartament'),
-            'nume_asociatie': raw.get('nume_asociatie'),
-        }
-        if self.entity_description.key == 'asociatie':
-            assoc = raw.get('asociatie_bruta') or {}
-            mapping = {
-                'CUI': assoc.get('cui'),
-                'Adresă': assoc.get('adresa'),
-                'Oraș': assoc.get('oras'),
-                'Sector': assoc.get('sector'),
-                'Județ': assoc.get('judet'),
-                'Administrator': assoc.get('administrator'),
-                'Președinte': assoc.get('presedinte'),
-                'Cenzor': assoc.get('cenzor'),
-                'Contabil': assoc.get('contabil'),
-                'Locul încasărilor': assoc.get('loc_inc'),
-                'Telefon': assoc.get('telefon'),
-                'Email asociație': assoc.get('email'),
-                'Avertisment': assoc.get('avertisment'),
-            }
-            attrs.update({k:v for k,v in mapping.items() if v not in (None, '')})
-        elif self.entity_description.key == 'factura_restanta':
-            det = (_valoare_consum(self.coordinator.data, 'factura_restanta', self.cont.id_cont) or None)
-            info = None
-            for c in self.coordinator.data.consumuri:
-                if c.id_cont == self.cont.id_cont and c.cheie == 'factura_restanta':
-                    info = c.date_brute or {}
-                    break
-            detalii = (info or {}).get('restante_detalii') or []
-            luni = {}
-            for item in detalii:
-                luna = str(item.get('luna') or '')
-                if not luna:
-                    continue
-                luni.setdefault(luna, 0.0)
-                try:
-                    luni[luna] += int(item.get('suma') or 0) / 100
-                except Exception:
-                    pass
-            month_names = ['ianuarie','februarie','martie','aprilie','mai','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie']
-            for luna, total in sorted(luni.items()):
-                try:
-                    name = month_names[int(luna.split('-')[1]) - 1]
-                except Exception:
-                    name = luna
-                attrs[f'Restanță luna {name}'] = f"{round(total, 2)} lei"
-            if detalii:
-                attrs['--- Detalii factură'] = ''
-                for item in detalii:
-                    titlu = item.get('titlu') or 'Poziție'
-                    luna = str(item.get('luna') or '')
-                    try:
-                        name = month_names[int(luna.split('-')[1]) - 1]
-                    except Exception:
-                        name = luna
-                    try:
-                        suma = round(int(item.get('suma') or 0) / 100, 2)
-                    except Exception:
-                        suma = 0.0
-                    attrs[f'{titlu} {name}'] = f"{suma} lei"
-                attrs['--- Total restanțe'] = ''
-            if info and 'total' in info:
-                attrs['Total'] = f"{round(float(info['total']), 2)} lei"
-        elif self.entity_description.key == 'arhiva_plati':
-            info = None
-            for c in self.coordinator.data.consumuri:
-                if c.id_cont == self.cont.id_cont and c.cheie == 'arhiva_plati':
-                    info = c.date_brute or {}
-                    break
-            plati = (info or {}).get('plati') or []
-            attrs['Total plăți'] = len(plati)
-            month_names = ['ianuarie','februarie','martie','aprilie','mai','iunie','iulie','august','septembrie','octombrie','noiembrie','decembrie']
-            for idx, item in enumerate(plati[:12], start=1):
-                data_raw = str(item.get('data') or '')
-                label = f'Plata {idx}'
-                if data_raw:
-                    try:
-                        parts = data_raw.split('-')
-                        label = f"Plătită pe {int(parts[2])} {month_names[int(parts[1])-1]} {parts[0]}"
-                    except Exception:
-                        label = f'Plătită pe {data_raw}'
-                try:
-                    suma = round(int(item.get('suma') or 0) / 100, 2)
-                except Exception:
-                    suma = 0.0
-                attrs[label] = f"{suma} lei"
-        elif self.entity_description.key == 'numar_tichete':
-            info = None
-            for c in self.coordinator.data.consumuri:
-                if c.id_cont == self.cont.id_cont and c.cheie == 'numar_tichete':
-                    info = c.date_brute or {}
-                    break
-            tichete = (info or {}).get('tichete') or []
-            detalii = (info or {}).get('ticket_details') or {}
-            attrs['Total tichete'] = len(tichete)
-            for item in tichete[:5]:
-                tid = str(item.get('id_ticket') or item.get('id') or '')
-                if not tid:
-                    continue
-                detail = detalii.get(tid) or {}
-                status = 'Deschis' if str(detail.get('open', '0')) == '1' else 'Închis'
-                attrs[f'Tichet ID {tid}'] = status
-        elif self.entity_description.key == 'citire_permisa':
-            info = None
-            for c in self.coordinator.data.consumuri:
-                if c.id_cont == self.cont.id_cont and c.cheie == 'citire_permisa':
-                    info = c.date_brute or {}
-                    break
-            if info:
-                if info.get('indecsi_start'):
-                    attrs['Perioadă start'] = info.get('indecsi_start')
-                if info.get('indecsi_end'):
-                    attrs['Perioadă sfârșit'] = info.get('indecsi_end')
-                if info.get('data_scadenta'):
-                    attrs['Data scadență'] = info.get('data_scadenta')
-                attrs['Flag API (can_edit_index)'] = 'Da' if str(info.get('can_edit_index', '0')) == '1' else 'Nu'
-        return attrs
-
-
-class SenzorContorEbloc(EntitateUtilitatiRomania, SensorEntity):
-    def __init__(self, coordonator: CoordonatorUtilitatiRomania, cont, contor: dict[str, Any]) -> None:
-        super().__init__(coordonator)
-        self.cont = cont
-        self.contor = contor
-        slug = slug_apartament_ebloc(cont)
-        self._attr_unique_id = f"{coordonator.intrare.entry_id}_ebloc_{slug}_index_{contor['slug']}"
-        self._attr_name = f"Index {contor['titlu']}"
-        self._attr_suggested_object_id = f"ebloc_{slug}_index_{contor['slug']}"
-        self._attr_native_unit_of_measurement = 'm³'
-        self._attr_device_info = info_device_ebloc_apartament(coordonator.intrare.entry_id, cont)
-        self._attr_icon = 'mdi:counter'
-        self._attr_state_class = 'total_increasing'
-
-    @property
-    def native_value(self):
-        return self.contor.get('index_actual')
-
-    @property
-    def extra_state_attributes(self):
-        return {
-            'ID contor': self.contor.get('id_contor'),
-            'Denumire contor': self.contor.get('titlu'),
-            'Tip contor': self.contor.get('tip_contor'),
-            'Index actual': f"{self.contor.get('index_actual')} m³" if self.contor.get('index_actual') is not None else 'Nesetat',
-            'Index nou': f"{self.contor.get('index_nou')} m³" if self.contor.get('index_nou') is not None else 'Nesetat',
-            'Editare permisă': 'Da' if self.contor.get('editare_permisa') else 'Nu',
-            'Drept editare': 'Da' if self.contor.get('drept_editare') else 'Nu',
-            'Serie contor': self.contor.get('serie_contor') or None,
-            'Etichetă contor': self.contor.get('eticheta_contor') or None,
-            'Estimat': 'Da' if self.contor.get('estimat') else 'Nu',
-        }
